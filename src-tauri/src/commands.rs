@@ -240,10 +240,72 @@ pub async fn check_models() -> Result<bool, String> {
 
 #[tauri::command]
 pub async fn start_auto_grade(
-    _project_id: String,
-    _on_progress: Channel<ProgressPayload>,
+    project_id: String,
+    on_progress: Channel<ProgressPayload>,
 ) -> Result<Project, String> {
-    Err("Not implemented yet".into())
+    let mut project = Project::load(&project_id)?;
+    let total = project.photos.len();
+
+    for i in 0..total {
+        // Only auto-grade photos that are currently Ungraded
+        if project.photos[i].grade != Grade::Ungraded {
+            let _ = on_progress.send(ProgressPayload {
+                current: i + 1,
+                total,
+                message: "Grading photos...".into(),
+            });
+            continue;
+        }
+
+        let photo_path = project.photos[i].path.clone();
+
+        // Run heuristics
+        let heuristic = match crate::grader::heuristics::analyze(&photo_path) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Warning: heuristic analysis failed for {:?}: {}", photo_path, e);
+                let _ = on_progress.send(ProgressPayload {
+                    current: i + 1,
+                    total,
+                    message: "Grading photos...".into(),
+                });
+                continue;
+            }
+        };
+
+        project.photos[i].sharpness_score = Some(heuristic.sharpness);
+
+        if heuristic.is_bad {
+            project.photos[i].grade = Grade::Bad;
+            project.photos[i].grade_source = GradeSource::Auto;
+        } else {
+            // Run aesthetic scoring
+            let aesthetic = match crate::grader::aesthetic::score_aesthetic(&photo_path) {
+                Ok(score) => score,
+                Err(e) => {
+                    eprintln!("Warning: aesthetic scoring failed for {:?}: {}", photo_path, e);
+                    5.0 // Default to neutral score on failure
+                }
+            };
+            project.photos[i].aesthetic_score = Some(aesthetic);
+
+            if aesthetic >= 5.0 {
+                project.photos[i].grade = Grade::Good;
+            } else {
+                project.photos[i].grade = Grade::Ok;
+            }
+            project.photos[i].grade_source = GradeSource::Auto;
+        }
+
+        let _ = on_progress.send(ProgressPayload {
+            current: i + 1,
+            total,
+            message: "Grading photos...".into(),
+        });
+    }
+
+    project.save()?;
+    Ok(project)
 }
 
 #[tauri::command]
