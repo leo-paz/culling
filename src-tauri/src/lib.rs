@@ -1,5 +1,6 @@
 mod commands;
 mod grader;
+mod models;
 mod organizer;
 mod project;
 mod scanner;
@@ -20,6 +21,7 @@ pub fn run() {
             commands::start_auto_grade,
             commands::generate_thumbnails,
             commands::get_thumbnail_path,
+            commands::check_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
