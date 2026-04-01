@@ -9,6 +9,9 @@
   let detecting = $state(false);
   let detectProgress = $state<{ current: number; total: number; message: string } | null>(null);
 
+  let grading = $state(false);
+  let gradeProgress = $state<{ current: number; total: number; message: string } | null>(null);
+
   let hasClusters = $derived(
     ($currentProject?.clusters?.length ?? 0) > 0
   );
@@ -46,6 +49,31 @@
     } finally {
       detecting = false;
       detectProgress = null;
+    }
+  }
+
+  async function startAutoGrade() {
+    const project = get(currentProject);
+    if (!project) return;
+
+    grading = true;
+    gradeProgress = null;
+    const onProgress = new Channel<{ current: number; total: number; message: string }>();
+    onProgress.onmessage = (p) => {
+      gradeProgress = p;
+    };
+
+    try {
+      const updated = await invoke<Project>('start_auto_grade', {
+        projectId: project.id,
+        onProgress,
+      });
+      currentProject.set(updated);
+    } catch (e) {
+      console.error('Auto-grade failed:', e);
+    } finally {
+      grading = false;
+      gradeProgress = null;
     }
   }
 </script>
@@ -92,12 +120,28 @@
 
     <Tooltip.Root>
       <Tooltip.Trigger>
-        <Button variant="outline" size="sm" disabled class="text-xs border-zinc-700 text-zinc-500">
-          Auto-Grade
-        </Button>
+        {#if grading}
+          <Button variant="outline" size="sm" disabled class="text-xs border-zinc-700 text-zinc-400">
+            {#if gradeProgress}
+              Grading... {gradeProgress.current}/{gradeProgress.total}
+            {:else}
+              Grading...
+            {/if}
+          </Button>
+        {:else}
+          <Button
+            variant="outline"
+            size="sm"
+            class="text-xs border-zinc-700 text-zinc-300 hover:text-zinc-100"
+            disabled={!$currentProject}
+            onclick={startAutoGrade}
+          >
+            Auto-Grade
+          </Button>
+        {/if}
       </Tooltip.Trigger>
       <Tooltip.Content>
-        <p>Coming soon</p>
+        <p>Automatically grade photos based on quality heuristics</p>
       </Tooltip.Content>
     </Tooltip.Root>
   </div>
