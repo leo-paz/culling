@@ -22,7 +22,8 @@
   async function openProject(project: Project) {
     currentIndex.set(0);
     currentProject.set(project);
-    await generateThumbnails(project.id);
+    // Thumbnails generate lazily — filmstrip falls back to full photos
+    generateThumbnailsInBackground(project.id);
   }
 
   async function handleImport() {
@@ -37,29 +38,31 @@
       currentProject.set(project);
       isImporting = false;
 
-      await generateThumbnails(project.id);
+      // Don't block — start thumbnail generation in background
+      generateThumbnailsInBackground(project.id);
     } catch (e) {
       isImporting = false;
       error = e instanceof Error ? e.message : String(e);
     }
   }
 
-  async function generateThumbnails(projectId: string) {
-    try {
-      thumbnailProgress.set(0);
-      const channel = new Channel<{ progress: number }>();
-      channel.onmessage = (message) => {
-        thumbnailProgress.set(message.progress);
-      };
-      await invoke<number>('generate_thumbnails', {
-        projectId,
-        onProgress: channel,
+  function generateThumbnailsInBackground(projectId: string) {
+    // Fire-and-forget: thumbnails generate in background while user can browse
+    const channel = new Channel<{ current: number; total: number; message: string }>();
+    channel.onmessage = (msg) => {
+      if (msg.total > 0) {
+        thumbnailProgress.set(Math.round((msg.current / msg.total) * 100));
+      }
+    };
+    invoke<number>('generate_thumbnails', {
+      projectId,
+      onProgress: channel,
+    })
+      .then(() => thumbnailProgress.set(null))
+      .catch((e) => {
+        thumbnailProgress.set(null);
+        console.error('Thumbnail generation failed:', e);
       });
-      thumbnailProgress.set(null);
-    } catch (e) {
-      thumbnailProgress.set(null);
-      console.error('Thumbnail generation failed:', e);
-    }
   }
 
   // Load recent projects on mount
@@ -104,7 +107,7 @@
           Recent Projects
         </p>
         <div class="space-y-1">
-          {#each recentProjects as project}
+          {#each recentProjects as project (project.id)}
             <button
               class="w-full text-left px-3 py-2 rounded-md text-sm text-zinc-300 hover:bg-surface-raised hover:text-zinc-100 transition-colors duration-150 cursor-pointer"
               onclick={() => openProject(project)}

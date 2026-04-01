@@ -1,21 +1,32 @@
 <script lang="ts">
   import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { currentProject, currentIndex, navigateTo, filteredPhotos, type Photo } from '$lib/stores/project';
 
   let scrollContainer: HTMLDivElement | undefined = $state();
-  let thumbnailPaths = $state<Map<string, string>>(new Map());
+  let thumbnailPaths = $state<SvelteMap<string, string>>(new SvelteMap());
 
-  // Track last grade per photo to detect changes and trigger pulse
-  let lastGrades = $state<Map<string, Photo['grade']>>(new Map());
-  let pulsingPhotos = $state<Set<string>>(new Set());
+  // Grade pulse tracking — use a plain object ref to avoid reactive read/write loop
+  let gradeCache: Record<string, Photo['grade']> = {};
+  let pulsingPhotos = $state<SvelteSet<string>>(new SvelteSet());
 
-  // Load thumbnail paths for all photos
+  // Load thumbnail URLs — use convertFileSrc for asset protocol
+  // Only re-run when project ID changes (not on every photo grade change)
+  let lastProjectId = '';
   $effect(() => {
     const project = $currentProject;
-    if (!project) return;
+    if (!project || project.id === lastProjectId) return;
+    lastProjectId = project.id;
 
     const loadThumbnails = async () => {
-      const paths = new Map<string, string>();
+      const paths = new SvelteMap<string, string>();
+      for (const photo of project.photos) {
+        // Use full image via asset protocol (thumbnails may not be ready)
+        paths.set(photo.filename, convertFileSrc(photo.path));
+      }
+      thumbnailPaths = paths;
+
+      // Then try to upgrade to actual thumbnails
       for (const photo of project.photos) {
         try {
           const thumbPath = await invoke<string>('get_thumbnail_path', {
@@ -24,37 +35,31 @@
           });
           paths.set(photo.filename, convertFileSrc(thumbPath));
         } catch {
-          // Fallback to full image if thumbnail not available
-          paths.set(photo.filename, convertFileSrc(photo.path));
+          // Keep full image fallback
         }
       }
-      thumbnailPaths = paths;
     };
 
     loadThumbnails();
   });
 
-  // Detect grade changes and trigger pulse
+  // Detect grade changes and trigger pulse — use untrack to avoid loop
   $effect(() => {
     const photos = $filteredPhotos;
-    const newPulsing = new Set<string>();
-    const newGrades = new Map<string, Photo['grade']>();
+    const newPulsing = new SvelteSet<string>();
 
     for (const photo of photos) {
-      const prev = lastGrades.get(photo.path);
-      newGrades.set(photo.path, photo.grade);
+      const prev = gradeCache[photo.path];
       if (prev !== undefined && prev !== photo.grade) {
         newPulsing.add(photo.path);
       }
+      gradeCache[photo.path] = photo.grade;
     }
-
-    lastGrades = newGrades;
 
     if (newPulsing.size > 0) {
       pulsingPhotos = newPulsing;
-      // Clear pulsing after animation completes
       setTimeout(() => {
-        pulsingPhotos = new Set();
+        pulsingPhotos = new SvelteSet();
       }, 400);
     }
   });
@@ -96,7 +101,7 @@
     style="scrollbar-width: thin; scrollbar-color: #3f3f46 transparent;"
   >
     {#if $currentProject}
-      {#each $filteredPhotos as photo, index}
+      {#each $filteredPhotos as photo, index (photo.path)}
         <button
           data-thumbnail
           class="relative flex-shrink-0 w-[88px] h-[100px] rounded overflow-hidden cursor-pointer transition-all duration-150 group"
