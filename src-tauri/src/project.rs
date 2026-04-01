@@ -1,3 +1,4 @@
+use crate::error::CullingError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -34,6 +35,7 @@ pub enum Grade {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub enum GradeSource {
     #[default]
+    Unset,
     Manual,
     Auto,
 }
@@ -56,13 +58,14 @@ pub struct Cluster {
 }
 
 /// Get the base directory for culling data (~/.culling/)
-pub fn data_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+pub fn data_dir() -> Result<PathBuf, CullingError> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| CullingError::Other("Could not find home directory".to_string()))?;
     Ok(home.join(".culling"))
 }
 
 /// Get the projects directory (~/.culling/projects/)
-pub fn projects_dir() -> Result<PathBuf, String> {
+pub fn projects_dir() -> Result<PathBuf, CullingError> {
     Ok(data_dir()?.join("projects"))
 }
 
@@ -78,38 +81,38 @@ impl Project {
     }
 
     /// Save project to disk
-    pub fn save(&self) -> Result<(), String> {
+    pub fn save(&self) -> Result<(), CullingError> {
         let dir = projects_dir()?;
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dir)?;
         let path = dir.join(format!("{}.json", self.id));
-        let json = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(path, json).map_err(|e| e.to_string())?;
+        let json = serde_json::to_string_pretty(self)?;
+        fs::write(path, json)?;
         Ok(())
     }
 
     /// Load project from disk by ID
-    pub fn load(id: &str) -> Result<Self, String> {
+    pub fn load(id: &str) -> Result<Self, CullingError> {
         let path = projects_dir()?.join(format!("{}.json", id));
-        let json = fs::read_to_string(&path)
-            .map_err(|e| format!("Could not load project: {}", e))?;
-        serde_json::from_str(&json).map_err(|e| format!("Invalid project file: {}", e))
+        let json = fs::read_to_string(&path)?;
+        let project: Self = serde_json::from_str(&json)?;
+        Ok(project)
     }
 
     /// List all saved projects
-    pub fn list_all() -> Result<Vec<Self>, String> {
+    pub fn list_all() -> Result<Vec<Self>, CullingError> {
         let dir = projects_dir()?;
         if !dir.exists() {
             return Ok(Vec::new());
         }
         let mut projects = Vec::new();
-        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(&dir)? {
+            let entry = entry?;
             if entry
                 .path()
                 .extension()
                 .map_or(false, |ext| ext == "json")
             {
-                let json = fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
+                let json = fs::read_to_string(entry.path())?;
                 if let Ok(project) = serde_json::from_str::<Project>(&json) {
                     projects.push(project);
                 }

@@ -1,16 +1,16 @@
+use crate::error::CullingError;
+use crate::project::data_dir;
 use image::imageops::FilterType;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::project::data_dir;
-
 /// Get the thumbnail directory for a project
-pub fn thumbnail_dir(project_id: &str) -> Result<PathBuf, String> {
+pub fn thumbnail_dir(project_id: &str) -> Result<PathBuf, CullingError> {
     Ok(data_dir()?.join("thumbnails").join(project_id))
 }
 
 /// Get the thumbnail path for a specific photo
-pub fn thumbnail_path(project_id: &str, filename: &str) -> Result<PathBuf, String> {
+pub fn thumbnail_path(project_id: &str, filename: &str) -> Result<PathBuf, CullingError> {
     Ok(thumbnail_dir(project_id)?.join(filename))
 }
 
@@ -19,9 +19,9 @@ pub fn generate_thumbnail(
     photo_path: &Path,
     project_id: &str,
     filename: &str,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, CullingError> {
     let thumb_dir = thumbnail_dir(project_id)?;
-    fs::create_dir_all(&thumb_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&thumb_dir)?;
 
     let output_path = thumb_dir.join(filename);
 
@@ -30,15 +30,12 @@ pub fn generate_thumbnail(
         return Ok(output_path);
     }
 
-    let img = image::open(photo_path)
-        .map_err(|e| format!("Failed to open {}: {}", photo_path.display(), e))?;
+    let img = image::open(photo_path)?;
 
     // Resize to fit within 300x300, maintaining aspect ratio
     let thumb = img.resize(300, 300, FilterType::Lanczos3);
 
-    thumb
-        .save(&output_path)
-        .map_err(|e| format!("Failed to save thumbnail: {}", e))?;
+    thumb.save(&output_path)?;
 
     Ok(output_path)
 }
@@ -50,7 +47,7 @@ pub fn generate_all_thumbnails<F>(
     photos: &[(PathBuf, String)],
     project_id: &str,
     on_progress: F,
-) -> Result<usize, String>
+) -> Result<usize, CullingError>
 where
     F: Fn(usize, usize) + Send + Sync,
 {

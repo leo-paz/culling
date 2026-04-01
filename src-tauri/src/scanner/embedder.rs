@@ -1,6 +1,7 @@
 //! ArcFace face embedding using ONNX Runtime.
 //! Performs face alignment (similarity transform) then runs w600k_r50.onnx.
 
+use crate::error::CullingError;
 use image::{DynamicImage, GenericImageView, Rgb, RgbImage};
 use nalgebra::{DMatrix, DVector};
 use ndarray::Array4;
@@ -23,11 +24,11 @@ pub struct FaceEmbedder {
 }
 
 impl FaceEmbedder {
-    pub fn new(model_path: &Path) -> Result<Self, String> {
+    pub fn new(model_path: &Path) -> Result<Self, CullingError> {
         let session = Session::builder()
-            .map_err(|e| format!("Failed to create session builder: {}", e))?
+            .map_err(|e| CullingError::Inference(format!("Failed to create session builder: {}", e)))?
             .commit_from_file(model_path)
-            .map_err(|e| format!("Failed to load model: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to load model: {}", e)))?;
 
         Ok(Self { session })
     }
@@ -37,10 +38,9 @@ impl FaceEmbedder {
         &mut self,
         image_path: &Path,
         keypoints: &[[f32; 2]; 5],
-    ) -> Result<Vec<f32>, String> {
+    ) -> Result<Vec<f32>, CullingError> {
         // 1. Load the original image
-        let img =
-            image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+        let img = image::open(image_path)?;
 
         // 2. Compute similarity transform from detected keypoints to ArcFace template
         let src: [[f64; 2]; 5] = [
@@ -71,17 +71,17 @@ impl FaceEmbedder {
 
         // 6. Run ArcFace inference
         let input_ref = TensorRef::from_array_view(tensor.view())
-            .map_err(|e| format!("Failed to create tensor ref: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to create tensor ref: {}", e)))?;
 
         let outputs = self
             .session
             .run(ort::inputs![input_ref])
-            .map_err(|e| format!("ArcFace inference failed: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("ArcFace inference failed: {}", e)))?;
 
         // 7. Extract 512-d output
         let (_shape, embedding_data) = outputs[0]
             .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract embedding: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to extract embedding: {}", e)))?;
 
         let mut embedding: Vec<f32> = embedding_data.iter().copied().collect();
 
@@ -106,7 +106,7 @@ impl FaceEmbedder {
 fn estimate_similarity_transform(
     src: &[[f64; 2]; 5],
     dst: &[[f64; 2]; 5],
-) -> Result<[[f64; 3]; 2], String> {
+) -> Result<[[f64; 3]; 2], CullingError> {
     let n = src.len();
     // Build 2N x 4 matrix A and 2N vector b
     let mut a_mat = DMatrix::<f64>::zeros(2 * n, 4);
@@ -136,9 +136,11 @@ fn estimate_similarity_transform(
     let ata = &at * &a_mat;
     let atb = &at * &b_vec;
 
-    let ata_inv = ata
-        .try_inverse()
-        .ok_or_else(|| "Failed to invert A^T*A matrix in similarity transform".to_string())?;
+    let ata_inv = ata.try_inverse().ok_or_else(|| {
+        CullingError::Inference(
+            "Failed to invert A^T*A matrix in similarity transform".to_string(),
+        )
+    })?;
 
     let x = ata_inv * atb;
 
@@ -156,7 +158,6 @@ fn estimate_similarity_transform(
 /// The inverse is: [a, b, -a*tx - b*ty; -b, a, b*tx - a*ty] / (a^2 + b^2)
 fn invert_similarity_transform(fwd: &[[f64; 3]; 2]) -> [[f64; 3]; 2] {
     let a = fwd[0][0];
-    let _neg_b = fwd[0][1]; // this is -b (unused, we derive b from fwd[1][0])
     let tx = fwd[0][2];
     let b = fwd[1][0]; // this is b
     let ty = fwd[1][2];

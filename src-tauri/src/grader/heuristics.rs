@@ -1,5 +1,6 @@
 //! Heuristic image quality assessment: sharpness, exposure.
 
+use crate::error::CullingError;
 use image::DynamicImage;
 use std::path::Path;
 
@@ -12,8 +13,8 @@ pub struct HeuristicResult {
 }
 
 /// Run all heuristic checks on an image.
-pub fn analyze(image_path: &Path) -> Result<HeuristicResult, String> {
-    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+pub fn analyze(image_path: &Path) -> Result<HeuristicResult, CullingError> {
+    let img = image::open(image_path)?;
 
     let sharpness = compute_sharpness(&img);
     let (is_overexposed, is_underexposed) = check_exposure(&img);

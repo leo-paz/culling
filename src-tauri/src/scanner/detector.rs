@@ -1,6 +1,7 @@
 //! SCRFD face detection using ONNX Runtime.
 //! Loads det_10g.onnx from InsightFace buffalo_l model pack.
 
+use crate::error::CullingError;
 use image::{DynamicImage, GenericImageView, RgbImage};
 use ndarray::Array4;
 use ort::session::Session;
@@ -26,11 +27,11 @@ pub struct FaceDetector {
 
 impl FaceDetector {
     /// Create a new face detector from an ONNX model file.
-    pub fn new(model_path: &Path) -> Result<Self, String> {
+    pub fn new(model_path: &Path) -> Result<Self, CullingError> {
         let session = Session::builder()
-            .map_err(|e| format!("Failed to create session builder: {}", e))?
+            .map_err(|e| CullingError::Inference(format!("Failed to create session builder: {}", e)))?
             .commit_from_file(model_path)
-            .map_err(|e| format!("Failed to load model: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to load model: {}", e)))?;
 
         Ok(Self {
             session,
@@ -44,10 +45,9 @@ impl FaceDetector {
         image_path: &Path,
         confidence_threshold: f32,
         min_face_size: u32,
-    ) -> Result<Vec<DetectedFace>, String> {
+    ) -> Result<Vec<DetectedFace>, CullingError> {
         // Load image
-        let img =
-            image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+        let img = image::open(image_path)?;
 
         let (orig_w, orig_h) = img.dimensions();
 
@@ -56,14 +56,14 @@ impl FaceDetector {
 
         // Create a TensorRef from the ndarray for zero-copy input
         let input_ref = TensorRef::from_array_view(input_tensor.view())
-            .map_err(|e| format!("Failed to create tensor ref: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to create tensor ref: {}", e)))?;
 
         // Run inference
         let input_size = self.input_size;
         let outputs = self
             .session
             .run(ort::inputs![input_ref])
-            .map_err(|e| format!("Inference failed: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Inference failed: {}", e)))?;
 
         // Post-process: decode detections
         let mut faces =
@@ -96,7 +96,7 @@ impl FaceDetector {
 fn preprocess(
     img: &DynamicImage,
     input_size: (u32, u32),
-) -> Result<(Array4<f32>, f32, f32, f32), String> {
+) -> Result<(Array4<f32>, f32, f32, f32), CullingError> {
     let (orig_w, orig_h) = img.dimensions();
     let (target_w, target_h) = input_size;
 
@@ -148,7 +148,7 @@ fn postprocess(
     pad_x: f32,
     pad_y: f32,
     confidence_threshold: f32,
-) -> Result<Vec<DetectedFace>, String> {
+) -> Result<Vec<DetectedFace>, CullingError> {
     let feat_stride_fpn: [usize; 3] = [8, 16, 32];
     let num_anchors: usize = 2;
     let (input_h, input_w) = (input_size.1 as usize, input_size.0 as usize);
@@ -168,10 +168,10 @@ fn postprocess(
 
     let num_outputs = outputs.len();
     if num_outputs != 9 {
-        return Err(format!(
+        return Err(CullingError::Inference(format!(
             "Expected 9 output tensors from SCRFD, got {}",
             num_outputs
-        ));
+        )));
     }
 
     let mut score_outputs: Vec<OutputInfo> = Vec::new();
@@ -181,12 +181,16 @@ fn postprocess(
     for i in 0..num_outputs {
         let (shape, _data) = outputs[i]
             .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract output {}: {}", i, e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to extract output {}: {}", i, e)))?;
         let dims: &[i64] = &**shape;
         if dims.len() < 2 {
-            return Err(format!("Output {} has unexpected shape {:?}", i, dims));
+            return Err(CullingError::Inference(format!(
+                "Output {} has unexpected shape {:?}",
+                i, dims
+            )));
         }
-        let last_dim = *dims.last().unwrap() as usize;
+        let last_dim = *dims.last()
+            .ok_or_else(|| CullingError::Inference(format!("Output {} has empty shape", i)))? as usize;
         let second_dim = dims[1] as usize;
 
         let info = OutputInfo {
@@ -200,21 +204,21 @@ fn postprocess(
             4 => bbox_outputs.push(info),
             10 => kps_outputs.push(info),
             _ => {
-                return Err(format!(
+                return Err(CullingError::Inference(format!(
                     "Output {} has unexpected last dimension {} (shape {:?})",
                     i, last_dim, dims
-                ))
+                )))
             }
         }
     }
 
     if score_outputs.len() != 3 || bbox_outputs.len() != 3 || kps_outputs.len() != 3 {
-        return Err(format!(
+        return Err(CullingError::Inference(format!(
             "Expected 3 score, 3 bbox, 3 kps outputs; got {}, {}, {}",
             score_outputs.len(),
             bbox_outputs.len(),
             kps_outputs.len()
-        ));
+        )));
     }
 
     // Sort each group by num_anchors_total descending
@@ -232,13 +236,13 @@ fn postprocess(
 
         let (_shape, scores_data) = outputs[score_info.index]
             .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract scores: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to extract scores: {}", e)))?;
         let (_shape, bbox_data) = outputs[bbox_info.index]
             .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract bboxes: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to extract bboxes: {}", e)))?;
         let (_shape, kps_data) = outputs[kps_info.index]
             .try_extract_tensor::<f32>()
-            .map_err(|e| format!("Failed to extract keypoints: {}", e))?;
+            .map_err(|e| CullingError::Inference(format!("Failed to extract keypoints: {}", e)))?;
 
         let feat_h = input_h / stride;
         let feat_w = input_w / stride;
@@ -316,26 +320,25 @@ fn nms(mut faces: Vec<DetectedFace>, iou_threshold: f32) -> Vec<DetectedFace> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let mut keep = Vec::new();
     let mut suppressed = vec![false; faces.len()];
 
     for i in 0..faces.len() {
         if suppressed[i] {
             continue;
         }
-        keep.push(faces[i].clone());
-
         for j in (i + 1)..faces.len() {
-            if suppressed[j] {
-                continue;
-            }
-            if iou(&faces[i].bbox, &faces[j].bbox) > iou_threshold {
+            if !suppressed[j] && iou(&faces[i].bbox, &faces[j].bbox) > iou_threshold {
                 suppressed[j] = true;
             }
         }
     }
 
-    keep
+    faces
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !suppressed[*i])
+        .map(|(_, f)| f)
+        .collect()
 }
 
 /// Compute intersection over union of two bounding boxes.
