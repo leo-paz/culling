@@ -19,8 +19,10 @@ export interface Photo {
 
 export interface Cluster {
   id: number;
-  label: string | null;
-  representative_face: number | null;
+  label: string;
+  representative_photo: string;
+  representative_bbox: [number, number, number, number];
+  photo_count: number;
 }
 
 export interface Project {
@@ -39,9 +41,24 @@ export const activePerson = writable<number | null>(null);
 export const thumbnailProgress = writable<number | null>(null);
 
 // Derived stores
+
+// Photos filtered by active person (or all if no person selected)
+export const filteredPhotos = derived(
+  [currentProject, activePerson],
+  ([$project, $person]) => {
+    if (!$project) return [];
+    if ($person === null) return $project.photos;
+    return $project.photos.filter((p) =>
+      p.faces.some((f) => f.cluster_id === $person)
+    );
+  }
+);
+
+export const filteredCount = derived(filteredPhotos, ($photos) => $photos.length);
+
 export const currentPhoto = derived(
-  [currentProject, currentIndex],
-  ([$project, $index]) => $project?.photos[$index] ?? null
+  [filteredPhotos, currentIndex],
+  ([$photos, $index]) => $photos[$index] ?? null
 );
 
 export const gradeCounts = derived(currentProject, ($project) => {
@@ -60,7 +77,7 @@ export const totalPhotos = derived(currentProject, ($p) => $p?.photos.length ?? 
 
 // Navigation helpers
 export function navigateNext() {
-  const total = get(totalPhotos);
+  const total = get(filteredCount);
   if (total === 0) return;
   currentIndex.update((i) => Math.min(i + 1, total - 1));
 }
@@ -70,7 +87,7 @@ export function navigatePrev() {
 }
 
 export function navigateTo(index: number) {
-  const total = get(totalPhotos);
+  const total = get(filteredCount);
   if (total === 0) return;
   currentIndex.set(Math.max(0, Math.min(index, total - 1)));
 }

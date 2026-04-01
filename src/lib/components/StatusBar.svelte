@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentPhoto, currentIndex, totalPhotos } from '$lib/stores/project';
+  import { currentPhoto, currentIndex, filteredCount } from '$lib/stores/project';
   import type { Photo } from '$lib/stores/project';
 
   function gradeColor(grade: Photo['grade']): string {
@@ -46,8 +46,8 @@
 
   <!-- Center: Position indicator -->
   <div class="text-zinc-500 font-mono">
-    {#if $totalPhotos > 0}
-      {$currentIndex + 1} / {$totalPhotos}
+    {#if $filteredCount > 0}
+      {$currentIndex + 1} / {$filteredCount}
     {/if}
   </div>
 
