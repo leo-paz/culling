@@ -1,24 +1,25 @@
 //! Photo export: copy keepers to output folder, organize by person, trash rejects.
 
+use crate::error::CullingError;
 use crate::project::{Grade, Project};
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub enum GradeFilter {
     All,
     OkAndGood,
     GoodOnly,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub enum Organization {
     Flat,
     ByPerson,
 }
 
 pub struct ExportOptions {
-    pub output_dir: String,
+    pub output_dir: PathBuf,
     pub grade_filter: GradeFilter,
     pub organization: Organization,
     pub trash_bad: bool,
@@ -30,12 +31,12 @@ pub fn export_photos<F>(
     project: &Project,
     options: &ExportOptions,
     on_progress: F,
-) -> Result<usize, String>
+) -> Result<usize, CullingError>
 where
-    F: Fn(usize, usize),
+    F: Fn(usize, usize) + Send + Sync,
 {
-    let output = Path::new(&options.output_dir);
-    fs::create_dir_all(output).map_err(|e| format!("Failed to create output directory: {}", e))?;
+    let output = &options.output_dir;
+    fs::create_dir_all(output)?;
 
     // Filter photos by grade
     // Ungraded photos count as "Ok" for filtering purposes
@@ -67,15 +68,12 @@ where
                     .unwrap_or_else(|| "Ungrouped".to_string());
 
                 let person_dir = output.join(&cluster_label);
-                fs::create_dir_all(&person_dir).map_err(|e| {
-                    format!("Failed to create person directory '{}': {}", cluster_label, e)
-                })?;
+                fs::create_dir_all(&person_dir)?;
                 person_dir.join(&photo.filename)
             }
         };
 
-        fs::copy(&photo.path, &dest)
-            .map_err(|e| format!("Failed to copy {}: {}", photo.filename, e))?;
+        fs::copy(&photo.path, &dest)?;
         on_progress(i + 1, total);
     }
 

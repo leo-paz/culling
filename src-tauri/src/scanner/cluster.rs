@@ -7,17 +7,23 @@
 //! linfa depends on ndarray 0.15 while this project uses ndarray 0.17, making
 //! the types incompatible without an adapter layer.
 
+use crate::error::CullingError;
 use std::collections::VecDeque;
 
 /// Cluster face embeddings using DBSCAN with Euclidean distance.
 ///
 /// Returns a vector of cluster labels. `None` means noise (unclustered),
 /// `Some(id)` means the point belongs to cluster `id`.
+///
+/// NOTE: This implementation has O(n^2) time and memory complexity for the
+/// pairwise distance computation. It performs well for projects with up to
+/// ~5,000 detected faces. For larger datasets, consider a spatial index
+/// (e.g., VP-tree) or approximate nearest neighbor approach.
 pub fn cluster_embeddings(
-    embeddings: &[Vec<f32>],
+    embeddings: &[&[f32]],
     eps: f64,
     min_samples: usize,
-) -> Result<Vec<Option<usize>>, String> {
+) -> Result<Vec<Option<usize>>, CullingError> {
     if embeddings.is_empty() {
         return Ok(Vec::new());
     }
@@ -37,7 +43,7 @@ pub fn cluster_embeddings(
                 nbrs.push(j);
                 continue;
             }
-            let dist_sq = squared_euclidean_f32(&embeddings[i], &embeddings[j]);
+            let dist_sq = squared_euclidean_f32(embeddings[i], embeddings[j]);
             if (dist_sq as f64) <= eps_sq {
                 nbrs.push(j);
             }
@@ -127,28 +133,31 @@ mod tests {
 
     #[test]
     fn single_point_is_noise() {
-        let embeddings = vec![vec![1.0, 0.0, 0.0]];
+        let embeddings_owned = vec![vec![1.0, 0.0, 0.0]];
+        let embeddings: Vec<&[f32]> = embeddings_owned.iter().map(|v| v.as_slice()).collect();
         let result = cluster_embeddings(&embeddings, 0.5, 2).unwrap();
         assert_eq!(result, vec![None]);
     }
 
     #[test]
     fn two_close_points_form_cluster() {
-        let embeddings = vec![vec![1.0, 0.0], vec![1.0, 0.01]];
+        let embeddings_owned = vec![vec![1.0, 0.0], vec![1.0, 0.01]];
+        let embeddings: Vec<&[f32]> = embeddings_owned.iter().map(|v| v.as_slice()).collect();
         let result = cluster_embeddings(&embeddings, 0.5, 2).unwrap();
         assert_eq!(result, vec![Some(0), Some(0)]);
     }
 
     #[test]
     fn distant_points_are_noise() {
-        let embeddings = vec![vec![0.0, 0.0], vec![10.0, 10.0]];
+        let embeddings_owned = vec![vec![0.0, 0.0], vec![10.0, 10.0]];
+        let embeddings: Vec<&[f32]> = embeddings_owned.iter().map(|v| v.as_slice()).collect();
         let result = cluster_embeddings(&embeddings, 0.5, 2).unwrap();
         assert_eq!(result, vec![None, None]);
     }
 
     #[test]
     fn two_clusters() {
-        let embeddings = vec![
+        let embeddings_owned = vec![
             // Cluster A
             vec![0.0, 0.0],
             vec![0.1, 0.0],
@@ -158,6 +167,7 @@ mod tests {
             vec![10.1, 10.0],
             vec![10.0, 10.1],
         ];
+        let embeddings: Vec<&[f32]> = embeddings_owned.iter().map(|v| v.as_slice()).collect();
         let result = cluster_embeddings(&embeddings, 0.5, 2).unwrap();
         // First three should share a cluster
         assert!(result[0].is_some());

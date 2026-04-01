@@ -1,4 +1,5 @@
 mod commands;
+mod error;
 mod grader;
 mod models;
 mod organizer;

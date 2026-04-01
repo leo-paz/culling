@@ -2,13 +2,14 @@
 //! A real NIMA model would be more accurate, but this provides a reasonable
 //! approximation using contrast and color saturation.
 
+use crate::error::CullingError;
 use image::DynamicImage;
 use std::path::Path;
 
 /// Compute a simple aesthetic score (0-10) based on image properties.
 /// This is a heuristic approximation -- a real NIMA model would be better.
-pub fn score_aesthetic(image_path: &Path) -> Result<f32, String> {
-    let img = image::open(image_path).map_err(|e| format!("Failed to open image: {}", e))?;
+pub fn score_aesthetic(image_path: &Path) -> Result<f32, CullingError> {
+    let img = image::open(image_path)?;
 
     let contrast_score = compute_contrast(&img);
     let saturation_score = compute_saturation(&img);

@@ -7,25 +7,26 @@
 //! To install models manually, download `buffalo_l.zip` from the InsightFace
 //! GitHub releases, extract the ONNX files, and place them in `~/.culling/models/`.
 
+use crate::error::CullingError;
 use crate::project::data_dir;
 use std::path::PathBuf;
 
 /// Directory where model files are stored (~/.culling/models/).
-pub fn models_dir() -> Result<PathBuf, String> {
+pub fn models_dir() -> Result<PathBuf, CullingError> {
     Ok(data_dir()?.join("models"))
 }
 
 /// Path to the SCRFD face detector model.
-pub fn detector_model_path() -> Result<PathBuf, String> {
+pub fn detector_model_path() -> Result<PathBuf, CullingError> {
     Ok(models_dir()?.join("det_10g.onnx"))
 }
 
 /// Path to the ArcFace face embedder model.
-pub fn embedder_model_path() -> Result<PathBuf, String> {
+pub fn embedder_model_path() -> Result<PathBuf, CullingError> {
     Ok(models_dir()?.join("w600k_r50.onnx"))
 }
 
 /// Check if all required model files are present on disk.
-pub fn models_available() -> Result<bool, String> {
+pub fn models_available() -> Result<bool, CullingError> {
     Ok(detector_model_path()?.exists() && embedder_model_path()?.exists())
 }
