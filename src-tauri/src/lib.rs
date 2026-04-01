@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 mod commands;
 mod config;
 mod error;
@@ -11,7 +13,12 @@ mod thumbnailer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_webdriver_automation::init());
+    }
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -26,9 +33,18 @@ pub fn run() {
             commands::get_thumbnail_path,
             commands::check_models,
             commands::export_photos,
+            commands::read_image,
             commands::get_config,
             commands::update_config,
         ])
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            {
+                let window = app.get_webview_window("main").unwrap();
+                window.open_devtools();
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
