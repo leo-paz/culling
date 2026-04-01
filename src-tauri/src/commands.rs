@@ -158,29 +158,25 @@ pub async fn generate_thumbnails(
     project_id: String,
     on_progress: Channel<ProgressPayload>,
 ) -> Result<usize, CullingError> {
-    tokio::task::spawn_blocking(move || {
-        let project = Project::load(&project_id)?;
-        let config = Config::load();
-        let max_size = config.thumbnails.max_size;
-        let photos: Vec<(PathBuf, String)> = project
-            .photos
-            .iter()
-            .map(|p| (p.path.clone(), p.filename.clone()))
-            .collect();
+    let project = Project::load(&project_id)?;
+    let config = Config::load();
+    let max_size = config.thumbnails.max_size;
+    let photos: Vec<(PathBuf, String)> = project
+        .photos
+        .iter()
+        .map(|p| (p.path.clone(), p.filename.clone()))
+        .collect();
 
-        let count =
-            thumbnailer::generate_all_thumbnails(&photos, &project_id, max_size, |current, total| {
-                let _ = on_progress.send(ProgressPayload {
-                    current,
-                    total,
-                    message: "Generating thumbnails...".into(),
-                });
-            })?;
+    let count =
+        thumbnailer::generate_all_thumbnails(&photos, &project_id, max_size, |current, total| {
+            let _ = on_progress.send(ProgressPayload {
+                current,
+                total,
+                message: "Generating thumbnails...".into(),
+            });
+        })?;
 
-        Ok(count)
-    })
-    .await
-    .map_err(|e| CullingError::Other(format!("Task panicked: {}", e)))?
+    Ok(count)
 }
 
 #[tauri::command]
@@ -224,6 +220,27 @@ pub async fn export_photos(
         })?;
 
     Ok(count)
+}
+
+/// Read an image file and return it as a base64 data URL.
+/// This bypasses the asset protocol entirely.
+#[tauri::command]
+pub async fn read_image(path: String) -> Result<String, CullingError> {
+    use std::fs;
+    let data = fs::read(&path)?;
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpeg")
+        .to_lowercase();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "tif" | "tiff" => "image/tiff",
+        _ => "image/jpeg",
+    };
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
+    Ok(format!("data:{};base64,{}", mime, b64))
 }
 
 #[tauri::command]

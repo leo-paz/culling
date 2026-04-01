@@ -48,6 +48,16 @@
 
     if (!$currentProject) return;
 
+    // Cmd+R / Ctrl+R → reload app (reset to welcome screen)
+    if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      currentProject.set(null);
+      currentIndex.set(0);
+      activePerson.set(null);
+      fullscreen.set(false);
+      return;
+    }
+
     // Cmd+E / Ctrl+E → open export dialog
     if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
