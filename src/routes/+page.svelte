@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { Button } from "$lib/components/ui/button";
 
   let name = $state("");
   let greetMsg = $state("");
@@ -10,6 +11,11 @@
     greetMsg = await invoke("greet", { name });
   }
 </script>
+
+<!-- Tailwind test -->
+<div class="bg-red-500 p-4 text-white text-center font-bold">
+  Tailwind CSS v4 is working!
+</div>
 
 <main class="container">
   <h1>Welcome to Tauri + Svelte</h1>
@@ -29,7 +35,7 @@
 
   <form class="row" onsubmit={greet}>
     <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
+    <Button type="submit">Greet</Button>
   </form>
   <p>{greetMsg}</p>
 </main>
