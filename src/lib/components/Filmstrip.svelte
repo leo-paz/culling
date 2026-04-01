@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke, convertFileSrc } from '@tauri-apps/api/core';
-  import { currentProject, currentIndex, navigateTo, type Photo } from '$lib/stores/project';
+  import { currentProject, currentIndex, navigateTo, filteredPhotos, type Photo } from '$lib/stores/project';
 
   let scrollContainer: HTMLDivElement | undefined = $state();
   let thumbnailPaths = $state<Map<string, string>>(new Map());
@@ -67,7 +67,7 @@
     style="scrollbar-width: thin; scrollbar-color: #3f3f46 transparent;"
   >
     {#if $currentProject}
-      {#each $currentProject.photos as photo, index}
+      {#each $filteredPhotos as photo, index}
         <button
           data-thumbnail
           class="relative flex-shrink-0 w-[88px] h-[100px] rounded overflow-hidden cursor-pointer transition-all duration-150 group"

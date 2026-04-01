@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Separator } from '$lib/components/ui/separator';
-  import { currentProject, gradeCounts } from '$lib/stores/project';
+  import { currentProject, gradeCounts, activePerson, currentIndex } from '$lib/stores/project';
 </script>
 
 <aside class="flex flex-col h-full bg-surface-raised border-r border-zinc-800 overflow-hidden">
@@ -17,13 +17,54 @@
   <Separator class="bg-zinc-800" />
 
   <!-- People Section -->
-  <div class="px-4 py-3">
+  <div class="px-4 py-3 flex-1 overflow-hidden flex flex-col">
     <h3 class="text-[10px] font-medium text-zinc-400 uppercase tracking-wider mb-2">
       People
     </h3>
-    <p class="text-xs text-zinc-500 italic">
-      Detect faces to see people
-    </p>
+
+    {#if $currentProject?.clusters && $currentProject.clusters.length > 0}
+      <!-- "All Photos" option -->
+      <button
+        class="w-full flex items-center gap-3 px-2 py-1.5 rounded text-xs text-left transition-colors"
+        class:bg-accent-muted={$activePerson === null}
+        class:text-accent={$activePerson === null}
+        class:text-zinc-300={$activePerson !== null}
+        class:hover:bg-zinc-800={$activePerson !== null}
+        onclick={() => { activePerson.set(null); currentIndex.set(0); }}
+      >
+        <span class="font-medium">All Photos</span>
+        <span class="ml-auto text-zinc-500 font-mono">{$currentProject.photos.length}</span>
+      </button>
+
+      <!-- Person list (scrollable) -->
+      <div class="mt-1 overflow-y-auto flex-1 space-y-0.5">
+        {#each $currentProject.clusters as cluster}
+          <button
+            class="w-full flex items-center gap-3 px-2 py-1.5 rounded text-xs text-left transition-colors"
+            class:bg-accent-muted={$activePerson === cluster.id}
+            class:text-accent={$activePerson === cluster.id}
+            class:border-l-2={$activePerson === cluster.id}
+            class:border-accent={$activePerson === cluster.id}
+            class:text-zinc-300={$activePerson !== cluster.id}
+            class:hover:bg-zinc-800={$activePerson !== cluster.id}
+            onclick={() => { activePerson.set(cluster.id); currentIndex.set(0); }}
+          >
+            <!-- Face thumbnail (small circle) -->
+            <div class="w-8 h-8 rounded-full bg-surface-overlay overflow-hidden flex-shrink-0">
+              <div class="w-full h-full flex items-center justify-center text-zinc-500 text-[10px] font-medium">
+                {cluster.label.charAt(0).toUpperCase()}
+              </div>
+            </div>
+            <span class="font-medium truncate">{cluster.label}</span>
+            <span class="ml-auto text-zinc-500 font-mono flex-shrink-0">{cluster.photo_count}</span>
+          </button>
+        {/each}
+      </div>
+    {:else}
+      <p class="text-xs text-zinc-500 italic">
+        Detect faces to see people
+      </p>
+    {/if}
   </div>
 
   <Separator class="bg-zinc-800" />
@@ -65,6 +106,4 @@
     </div>
   </div>
 
-  <!-- Spacer to push content up -->
-  <div class="flex-1"></div>
 </aside>
