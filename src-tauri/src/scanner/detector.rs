@@ -354,3 +354,62 @@ fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
 
     inter / (area_a + area_b - inter + 1e-6)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iou_identical_boxes() {
+        let b = [0.0, 0.0, 10.0, 10.0];
+        assert!((iou(&b, &b) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn iou_no_overlap() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [20.0, 20.0, 30.0, 30.0];
+        assert!(iou(&a, &b) < 1e-6);
+    }
+
+    #[test]
+    fn iou_partial_overlap() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        let b = [5.0, 5.0, 15.0, 15.0];
+        // Intersection: 5x5 = 25, Union: 100 + 100 - 25 = 175
+        let expected = 25.0 / 175.0;
+        assert!((iou(&a, &b) - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn nms_removes_overlapping_lower_confidence() {
+        let faces = vec![
+            DetectedFace {
+                bbox: [0.0, 0.0, 10.0, 10.0],
+                confidence: 0.9,
+                keypoints: [[0.0; 2]; 5],
+            },
+            DetectedFace {
+                bbox: [1.0, 1.0, 11.0, 11.0], // high overlap
+                confidence: 0.5,
+                keypoints: [[0.0; 2]; 5],
+            },
+            DetectedFace {
+                bbox: [50.0, 50.0, 60.0, 60.0], // no overlap
+                confidence: 0.8,
+                keypoints: [[0.0; 2]; 5],
+            },
+        ];
+        let result = nms(faces, 0.4);
+        assert_eq!(result.len(), 2);
+        assert!((result[0].confidence - 0.9).abs() < 1e-6);
+        assert!((result[1].confidence - 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn sigmoid_values() {
+        assert!((sigmoid(0.0) - 0.5).abs() < 1e-6);
+        assert!(sigmoid(10.0) > 0.99);
+        assert!(sigmoid(-10.0) < 0.01);
+    }
+}

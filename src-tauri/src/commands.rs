@@ -1,16 +1,14 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::ipc::Channel;
 use walkdir::WalkDir;
 
+use crate::config::Config;
 use crate::error::CullingError;
 use crate::organizer::export::{ExportOptions, GradeFilter, Organization};
-use crate::project::{Cluster, FaceDetection, Grade, GradeSource, Photo, Project};
-use crate::scanner::cluster::cluster_embeddings;
-use crate::scanner::detector::FaceDetector;
-use crate::scanner::embedder::FaceEmbedder;
+use crate::pipeline::{self, ProgressFn};
+use crate::project::{Grade, GradeSource, Photo, Project};
 use crate::thumbnailer;
 
 const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "heic", "tif", "tiff"];
@@ -109,145 +107,21 @@ pub async fn start_face_detection(
 ) -> Result<Project, CullingError> {
     tokio::task::spawn_blocking(move || {
         let mut project = Project::load(&project_id)?;
+        let config = Config::load();
 
-        // Check models exist
-        let det_path = crate::models::detector_model_path()?;
-        let emb_path = crate::models::embedder_model_path()?;
-        if !det_path.exists() || !emb_path.exists() {
-            return Err(CullingError::ModelNotFound(
-                "Models not found. Please download buffalo_l models to ~/.culling/models/"
-                    .to_string(),
-            ));
-        }
-
-        // Initialize detector and embedder
-        let mut detector = FaceDetector::new(&det_path)?;
-        let mut embedder = FaceEmbedder::new(&emb_path)?;
-
-        let total = project.photos.len();
-
-        // Phase 1: Detect faces and compute embeddings
-        for i in 0..total {
-            let photo_path = project.photos[i].path.clone();
-
-            let detected = detector.detect(&photo_path, 0.5, 80)?;
-
-            let mut face_detections = Vec::new();
-            for face in &detected {
-                match embedder.embed(&photo_path, &face.keypoints) {
-                    Ok(embedding) => {
-                        face_detections.push(FaceDetection {
-                            bbox: face.bbox,
-                            confidence: face.confidence,
-                            embedding,
-                            cluster_id: None,
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: failed to embed face: {}", e);
-                    }
-                }
-            }
-
-            project.photos[i].faces = face_detections;
-
+        let progress: ProgressFn = Box::new(move |current, total, message| {
             let _ = on_progress.send(ProgressPayload {
-                current: i + 1,
+                current,
                 total,
-                message: "Detecting faces...".into(),
+                message: message.to_string(),
             });
-        }
+        });
 
-        // Phase 2: Cluster all face embeddings
-        let all_embeddings: Vec<&[f32]> = project
-            .photos
-            .iter()
-            .flat_map(|p| p.faces.iter().map(|f| f.embedding.as_slice()))
-            .collect();
-
-        if !all_embeddings.is_empty() {
-            let labels = cluster_embeddings(&all_embeddings, 0.75, 2)?;
-
-            // Assign cluster IDs back to faces
-            let mut label_idx = 0;
-            for photo in &mut project.photos {
-                for face in &mut photo.faces {
-                    face.cluster_id = labels[label_idx];
-                    label_idx += 1;
-                }
-            }
-
-            // Build cluster summaries
-            build_cluster_summaries(&mut project);
-        }
-
-        project.save()?;
+        pipeline::run_face_detection(&mut project, &config, &progress)?;
         Ok(project)
     })
     .await
     .map_err(|e| CullingError::Other(format!("Task panicked: {}", e)))?
-}
-
-/// Build `Cluster` summaries from face detections across all photos.
-///
-/// For each unique cluster ID, finds the highest-confidence face as the
-/// representative, counts the number of photos containing that cluster,
-/// and assigns an auto-numbered label ("Person 1", "Person 2", etc.).
-fn build_cluster_summaries(project: &mut Project) {
-    // Collect per-cluster info: best confidence, representative photo/bbox, photo set
-    struct ClusterInfo {
-        best_confidence: f32,
-        best_photo: PathBuf,
-        best_bbox: [f32; 4],
-        photo_paths: std::collections::HashSet<PathBuf>,
-    }
-
-    let mut cluster_map: HashMap<usize, ClusterInfo> = HashMap::new();
-
-    for photo in &project.photos {
-        for face in &photo.faces {
-            if let Some(cid) = face.cluster_id {
-                let entry = cluster_map.entry(cid).or_insert_with(|| ClusterInfo {
-                    best_confidence: 0.0,
-                    best_photo: PathBuf::new(),
-                    best_bbox: [0.0; 4],
-                    photo_paths: std::collections::HashSet::new(),
-                });
-
-                entry.photo_paths.insert(photo.path.clone());
-
-                if face.confidence > entry.best_confidence {
-                    entry.best_confidence = face.confidence;
-                    entry.best_photo = photo.path.clone();
-                    entry.best_bbox = face.bbox;
-                }
-            }
-        }
-    }
-
-    // Sort cluster IDs for deterministic ordering
-    let mut cluster_ids: Vec<usize> = cluster_map.keys().copied().collect();
-    cluster_ids.sort();
-
-    project.clusters = cluster_ids
-        .into_iter()
-        .enumerate()
-        .map(|(label_num, cid)| {
-            let info = &cluster_map[&cid];
-            Cluster {
-                id: cid,
-                label: format!("Person {}", label_num + 1),
-                representative_photo: info.best_photo.clone(),
-                representative_bbox: info.best_bbox,
-                photo_count: info.photo_paths.len(),
-            }
-        })
-        .collect();
-}
-
-#[tauri::command]
-pub async fn check_models() -> Result<bool, CullingError> {
-    crate::models::models_available()
 }
 
 #[tauri::command]
@@ -257,77 +131,26 @@ pub async fn start_auto_grade(
 ) -> Result<Project, CullingError> {
     tokio::task::spawn_blocking(move || {
         let mut project = Project::load(&project_id)?;
-        let total = project.photos.len();
+        let config = Config::load();
 
-        for i in 0..total {
-            // Only auto-grade photos that are currently Ungraded
-            if project.photos[i].grade != Grade::Ungraded {
-                let _ = on_progress.send(ProgressPayload {
-                    current: i + 1,
-                    total,
-                    message: "Grading photos...".into(),
-                });
-                continue;
-            }
-
-            let photo_path = project.photos[i].path.clone();
-
-            // Run heuristics
-            let heuristic = match crate::grader::heuristics::analyze(&photo_path) {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: heuristic analysis failed for {:?}: {}",
-                        photo_path, e
-                    );
-                    let _ = on_progress.send(ProgressPayload {
-                        current: i + 1,
-                        total,
-                        message: "Grading photos...".into(),
-                    });
-                    continue;
-                }
-            };
-
-            project.photos[i].sharpness_score = Some(heuristic.sharpness);
-
-            if heuristic.is_bad {
-                project.photos[i].grade = Grade::Bad;
-                project.photos[i].grade_source = GradeSource::Auto;
-            } else {
-                // Run aesthetic scoring
-                let aesthetic = match crate::grader::aesthetic::score_aesthetic(&photo_path) {
-                    Ok(score) => score,
-                    Err(e) => {
-                        eprintln!(
-                            "Warning: aesthetic scoring failed for {:?}: {}",
-                            photo_path, e
-                        );
-                        5.0 // Default to neutral score on failure
-                    }
-                };
-                project.photos[i].aesthetic_score = Some(aesthetic);
-
-                if aesthetic >= 5.0 {
-                    project.photos[i].grade = Grade::Good;
-                } else {
-                    project.photos[i].grade = Grade::Ok;
-                }
-                project.photos[i].grade_source = GradeSource::Auto;
-            }
-
+        let progress: ProgressFn = Box::new(move |current, total, message| {
             let _ = on_progress.send(ProgressPayload {
-                current: i + 1,
+                current,
                 total,
-                message: "Grading photos...".into(),
+                message: message.to_string(),
             });
-        }
+        });
 
-        project.save()?;
+        pipeline::run_auto_grade(&mut project, &config, &progress)?;
         Ok(project)
     })
     .await
     .map_err(|e| CullingError::Other(format!("Task panicked: {}", e)))?
+}
+
+#[tauri::command]
+pub async fn check_models() -> Result<bool, CullingError> {
+    crate::models::models_available()
 }
 
 #[tauri::command]
@@ -337,6 +160,8 @@ pub async fn generate_thumbnails(
 ) -> Result<usize, CullingError> {
     tokio::task::spawn_blocking(move || {
         let project = Project::load(&project_id)?;
+        let config = Config::load();
+        let max_size = config.thumbnails.max_size;
         let photos: Vec<(PathBuf, String)> = project
             .photos
             .iter()
@@ -344,7 +169,7 @@ pub async fn generate_thumbnails(
             .collect();
 
         let count =
-            thumbnailer::generate_all_thumbnails(&photos, &project_id, |current, total| {
+            thumbnailer::generate_all_thumbnails(&photos, &project_id, max_size, |current, total| {
                 let _ = on_progress.send(ProgressPayload {
                     current,
                     total,
@@ -399,4 +224,14 @@ pub async fn export_photos(
         })?;
 
     Ok(count)
+}
+
+#[tauri::command]
+pub async fn get_config() -> Config {
+    Config::load()
+}
+
+#[tauri::command]
+pub async fn update_config(config: Config) -> Result<(), CullingError> {
+    config.save()
 }

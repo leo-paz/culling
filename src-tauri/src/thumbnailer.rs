@@ -19,6 +19,7 @@ pub fn generate_thumbnail(
     photo_path: &Path,
     project_id: &str,
     filename: &str,
+    max_size: u32,
 ) -> Result<PathBuf, CullingError> {
     let thumb_dir = thumbnail_dir(project_id)?;
     fs::create_dir_all(&thumb_dir)?;
@@ -32,8 +33,8 @@ pub fn generate_thumbnail(
 
     let img = image::open(photo_path)?;
 
-    // Resize to fit within 300x300, maintaining aspect ratio
-    let thumb = img.resize(300, 300, FilterType::Lanczos3);
+    // Resize to fit within max_size x max_size, maintaining aspect ratio
+    let thumb = img.resize(max_size, max_size, FilterType::Lanczos3);
 
     thumb.save(&output_path)?;
 
@@ -46,6 +47,7 @@ pub fn generate_thumbnail(
 pub fn generate_all_thumbnails<F>(
     photos: &[(PathBuf, String)],
     project_id: &str,
+    max_size: u32,
     on_progress: F,
 ) -> Result<usize, CullingError>
 where
@@ -55,7 +57,7 @@ where
     let mut generated = 0;
 
     for (i, (path, filename)) in photos.iter().enumerate() {
-        match generate_thumbnail(path, project_id, filename) {
+        match generate_thumbnail(path, project_id, filename, max_size) {
             Ok(_) => generated += 1,
             Err(e) => eprintln!(
                 "Warning: failed to generate thumbnail for {}: {}",

@@ -1,5 +1,6 @@
 //! Heuristic image quality assessment: sharpness, exposure.
 
+use crate::config::GradingConfig;
 use crate::error::CullingError;
 use image::DynamicImage;
 use std::path::Path;
@@ -13,12 +14,12 @@ pub struct HeuristicResult {
 }
 
 /// Run all heuristic checks on an image.
-pub fn analyze(image_path: &Path) -> Result<HeuristicResult, CullingError> {
+pub fn analyze(image_path: &Path, config: &GradingConfig) -> Result<HeuristicResult, CullingError> {
     let img = image::open(image_path)?;
 
     let sharpness = compute_sharpness(&img);
-    let (is_overexposed, is_underexposed) = check_exposure(&img);
-    let is_blurry = sharpness < 100.0;
+    let (is_overexposed, is_underexposed) = check_exposure(&img, config.exposure_clip_threshold);
+    let is_blurry = sharpness < config.sharpness_threshold;
 
     Ok(HeuristicResult {
         sharpness,
@@ -81,9 +82,9 @@ fn compute_sharpness(img: &DynamicImage) -> f32 {
 /// Check exposure by analyzing the luminance histogram.
 ///
 /// Returns (is_overexposed, is_underexposed).
-/// If >30% of pixels are in the top 10 bins (246-255), flagged as overexposed.
-/// If >30% of pixels are in the bottom 10 bins (0-9), flagged as underexposed.
-fn check_exposure(img: &DynamicImage) -> (bool, bool) {
+/// If more than `clip_threshold` fraction of pixels are in the top 10 bins (246-255), flagged as overexposed.
+/// If more than `clip_threshold` fraction of pixels are in the bottom 10 bins (0-9), flagged as underexposed.
+fn check_exposure(img: &DynamicImage, clip_threshold: f64) -> (bool, bool) {
     let gray = img.to_luma8();
     let total = gray.width() as f64 * gray.height() as f64;
 
@@ -99,5 +100,68 @@ fn check_exposure(img: &DynamicImage) -> (bool, bool) {
     let underexposed: f64 = histogram[..10].iter().sum::<u64>() as f64 / total;
     let overexposed: f64 = histogram[246..].iter().sum::<u64>() as f64 / total;
 
-    (overexposed > 0.3, underexposed > 0.3)
+    (overexposed > clip_threshold, underexposed > clip_threshold)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{GrayImage, Luma};
+
+    #[test]
+    fn uniform_image_is_blurry() {
+        // A solid gray image has zero Laplacian variance
+        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([128])));
+        let sharpness = compute_sharpness(&img);
+        assert!(
+            sharpness < 1.0,
+            "Uniform image should have near-zero sharpness, got {}",
+            sharpness
+        );
+    }
+
+    #[test]
+    fn high_contrast_image_is_sharp() {
+        // Checkerboard pattern has high Laplacian variance
+        let mut img = GrayImage::new(100, 100);
+        for y in 0..100 {
+            for x in 0..100 {
+                let val = if (x + y) % 2 == 0 { 255 } else { 0 };
+                img.put_pixel(x, y, Luma([val]));
+            }
+        }
+        let sharpness = compute_sharpness(&DynamicImage::ImageLuma8(img));
+        assert!(
+            sharpness > 100.0,
+            "Checkerboard should be sharp, got {}",
+            sharpness
+        );
+    }
+
+    #[test]
+    fn overexposed_image_detected() {
+        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([255])));
+        let (over, under) = check_exposure(&img, 0.3);
+        assert!(over, "All-white image should be flagged as overexposed");
+        assert!(!under);
+    }
+
+    #[test]
+    fn underexposed_image_detected() {
+        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([0])));
+        let (over, under) = check_exposure(&img, 0.3);
+        assert!(!over);
+        assert!(
+            under,
+            "All-black image should be flagged as underexposed"
+        );
+    }
+
+    #[test]
+    fn normal_exposure_not_flagged() {
+        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(100, 100, Luma([128])));
+        let (over, under) = check_exposure(&img, 0.3);
+        assert!(!over);
+        assert!(!under);
+    }
 }
