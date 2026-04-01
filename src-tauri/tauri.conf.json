@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "culling",
+  "productName": "Culling",
   "version": "0.1.0",
   "identifier": "com.culling.app",
   "build": {
@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "Culling",
-        "width": 800,
-        "height": 600
+        "width": 1400,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false,
+        "backgroundColor": "#09090b"
       }
     ],
     "security": {

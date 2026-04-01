@@ -1,10 +1,28 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Default capabilities for Culling",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:default"
+    "core:window:default",
+    "core:window:allow-set-fullscreen",
+    "opener:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    "fs:allow-write-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-dir",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-copy-file",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "fs:allow-stat",
+    "fs:scope-home-recursive",
+    "fs:scope-temp-recursive"
   ]
 }

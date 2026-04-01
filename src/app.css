@@ -1,1 +1,28 @@
 @import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+
+@theme {
+  --color-surface: #09090b;
+  --color-surface-raised: #18181b;
+  --color-surface-overlay: #27272a;
+  --color-accent: #d4a574;
+  --color-accent-hover: #c4956a;
+  --color-accent-muted: rgba(212, 165, 116, 0.25);
+  --color-grade-bad: #ef4444;
+  --color-grade-ok: #eab308;
+  --color-grade-good: #22c55e;
+  --font-display: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html, body {
+  background-color: var(--color-surface);
+  color: #fafafa;
+  font-family: var(--font-body);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+}
