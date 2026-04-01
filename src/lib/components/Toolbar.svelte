@@ -18,8 +18,9 @@
     ($currentProject?.clusters?.length ?? 0) > 0
   );
 
-  // When switching back to timeline, reset person filter
-  let prevViewMode = $state($viewMode);
+  // When switching back to timeline, reset person filter.
+  // prevViewMode is a plain variable (not $state) to avoid read/write loop in the effect.
+  let prevViewMode = $viewMode;
   $effect(() => {
     const mode = $viewMode;
     if (mode === 'timeline' && prevViewMode !== 'timeline') {
