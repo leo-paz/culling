@@ -1,4 +1,5 @@
 use crate::project::{Grade, GradeSource, Photo, Project};
+use crate::thumbnailer;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::ipc::Channel;
@@ -104,4 +105,37 @@ pub async fn start_auto_grade(
     _on_progress: Channel<ProgressPayload>,
 ) -> Result<Project, String> {
     Err("Not implemented yet".into())
+}
+
+#[tauri::command]
+pub async fn generate_thumbnails(
+    project_id: String,
+    on_progress: Channel<ProgressPayload>,
+) -> Result<usize, String> {
+    let project = Project::load(&project_id)?;
+    let photos: Vec<(PathBuf, String)> = project
+        .photos
+        .iter()
+        .map(|p| (p.path.clone(), p.filename.clone()))
+        .collect();
+
+    let count = thumbnailer::generate_all_thumbnails(&photos, &project_id, |current, total| {
+        let _ = on_progress.send(ProgressPayload {
+            current,
+            total,
+            message: "Generating thumbnails...".into(),
+        });
+    })?;
+
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn get_thumbnail_path(project_id: String, filename: String) -> Result<String, String> {
+    let path = thumbnailer::thumbnail_path(&project_id, &filename)?;
+    if path.exists() {
+        Ok(path.to_string_lossy().to_string())
+    } else {
+        Err("Thumbnail not found".into())
+    }
 }

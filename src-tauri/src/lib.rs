@@ -3,6 +3,7 @@ mod grader;
 mod organizer;
 mod project;
 mod scanner;
+mod thumbnailer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -17,6 +18,8 @@ pub fn run() {
             commands::update_grade,
             commands::start_face_detection,
             commands::start_auto_grade,
+            commands::generate_thumbnails,
+            commands::get_thumbnail_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
