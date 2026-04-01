@@ -1,8 +1,10 @@
 mod commands;
+mod config;
 mod error;
 mod grader;
 mod models;
 mod organizer;
+pub mod pipeline;
 mod project;
 mod scanner;
 mod thumbnailer;
@@ -24,6 +26,8 @@ pub fn run() {
             commands::get_thumbnail_path,
             commands::check_models,
             commands::export_photos,
+            commands::get_config,
+            commands::update_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

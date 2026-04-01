@@ -79,3 +79,42 @@ fn compute_saturation(img: &DynamicImage) -> f32 {
 
     (saturation_sum / total) as f32
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{GrayImage, Luma, Rgb, RgbImage};
+
+    #[test]
+    fn uniform_image_has_zero_contrast() {
+        let img = DynamicImage::ImageLuma8(GrayImage::from_pixel(50, 50, Luma([128])));
+        let score = compute_contrast(&img);
+        assert!(
+            score < 0.01,
+            "Uniform gray should have ~0 contrast, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn grayscale_image_has_zero_saturation() {
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(50, 50, Rgb([128, 128, 128])));
+        let score = compute_saturation(&img);
+        assert!(
+            score < 0.01,
+            "Gray image should have ~0 saturation, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn saturated_image_has_high_saturation() {
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(50, 50, Rgb([255, 0, 0])));
+        let score = compute_saturation(&img);
+        assert!(
+            score > 0.9,
+            "Pure red should have high saturation, got {}",
+            score
+        );
+    }
+}

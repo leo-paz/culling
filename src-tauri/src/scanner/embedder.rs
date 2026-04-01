@@ -236,3 +236,50 @@ fn bilinear_interpolate(img: &DynamicImage, x: f64, y: f64) -> Rgb<u8> {
 
     Rgb(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identity_transform() {
+        // Identical src and dst should produce near-identity transform
+        let pts = [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [5.0, 5.0],
+            [0.0, 10.0],
+            [10.0, 10.0],
+        ];
+        let fwd = estimate_similarity_transform(&pts, &pts).unwrap();
+        // a should be ~1, b should be ~0, tx/ty should be ~0
+        assert!((fwd[0][0] - 1.0).abs() < 1e-6);
+        assert!(fwd[0][1].abs() < 1e-6);
+        assert!(fwd[0][2].abs() < 1e-6);
+        assert!(fwd[1][2].abs() < 1e-6);
+    }
+
+    #[test]
+    fn inverse_roundtrip() {
+        let src = [
+            [10.0, 20.0],
+            [30.0, 20.0],
+            [20.0, 30.0],
+            [12.0, 40.0],
+            [28.0, 40.0],
+        ];
+        let fwd = estimate_similarity_transform(&src, &ARCFACE_TEMPLATE).unwrap();
+        let inv = invert_similarity_transform(&fwd);
+
+        // Composing forward and inverse should give near-identity
+        let a1 = fwd[0][0];
+        let b1 = fwd[0][1];
+        let a2 = inv[0][0];
+        let b2 = inv[0][1];
+        // Product of rotation parts: should be approx [1, 0; 0, 1]
+        let r00 = a1 * a2 + b1 * inv[1][0];
+        let r01 = a1 * b2 + b1 * inv[1][1];
+        assert!((r00 - 1.0).abs() < 1e-6, "r00 = {}", r00);
+        assert!(r01.abs() < 1e-6, "r01 = {}", r01);
+    }
+}
