@@ -11,6 +11,8 @@
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
   import AppShell from '$lib/components/AppShell.svelte';
 
+  let appShell: ReturnType<typeof AppShell> | undefined = $state();
+
   async function setGrade(grade: Photo['grade']) {
     const project = $currentProject;
     const photo = $currentPhoto;
@@ -40,6 +42,13 @@
 
     if (!$currentProject) return;
 
+    // Cmd+E / Ctrl+E → open export dialog
+    if (e.key === 'e' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      appShell?.openExport();
+      return;
+    }
+
     switch (e.key) {
       case 'ArrowLeft':
         e.preventDefault();
@@ -68,7 +77,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 {#if $currentProject}
-  <AppShell />
+  <AppShell bind:this={appShell} />
 {:else}
   <WelcomeScreen />
 {/if}

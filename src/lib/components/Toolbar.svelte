@@ -6,6 +6,8 @@
   import * as Tooltip from '$lib/components/ui/tooltip';
   import { viewMode, currentProject, activePerson, currentIndex, type Project } from '$lib/stores/project';
 
+  let { onexport = () => {} }: { onexport?: () => void } = $props();
+
   let detecting = $state(false);
   let detectProgress = $state<{ current: number; total: number; message: string } | null>(null);
 
@@ -150,12 +152,18 @@
   <div class="flex items-center">
     <Tooltip.Root>
       <Tooltip.Trigger>
-        <Button variant="outline" size="sm" disabled class="text-xs border-zinc-700 text-zinc-500">
+        <Button
+          variant="outline"
+          size="sm"
+          class="text-xs border-zinc-700 text-zinc-300 hover:text-zinc-100"
+          disabled={!$currentProject}
+          onclick={onexport}
+        >
           Export
         </Button>
       </Tooltip.Trigger>
       <Tooltip.Content>
-        <p>Coming soon</p>
+        <p>Export curated photos (Cmd+E)</p>
       </Tooltip.Content>
     </Tooltip.Root>
   </div>

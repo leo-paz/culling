@@ -22,6 +22,7 @@ pub fn run() {
             commands::generate_thumbnails,
             commands::get_thumbnail_path,
             commands::check_models,
+            commands::export_photos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
