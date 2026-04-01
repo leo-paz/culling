@@ -1,3 +1,4 @@
+use crate::organizer::export::{ExportOptions, GradeFilter, Organization};
 use crate::project::{Cluster, FaceDetection, Grade, GradeSource, Photo, Project};
 use crate::scanner::cluster::cluster_embeddings;
 use crate::scanner::detector::FaceDetector;
@@ -339,4 +340,45 @@ pub async fn get_thumbnail_path(project_id: String, filename: String) -> Result<
     } else {
         Err("Thumbnail not found".into())
     }
+}
+
+#[tauri::command]
+pub async fn export_photos(
+    project_id: String,
+    output_dir: String,
+    grade_filter: String,
+    organization: String,
+    trash_bad: bool,
+    on_progress: Channel<ProgressPayload>,
+) -> Result<usize, String> {
+    let project = Project::load(&project_id)?;
+
+    let filter = match grade_filter.as_str() {
+        "ok_and_good" => GradeFilter::OkAndGood,
+        "good_only" => GradeFilter::GoodOnly,
+        _ => GradeFilter::All,
+    };
+
+    let org = match organization.as_str() {
+        "by_person" => Organization::ByPerson,
+        _ => Organization::Flat,
+    };
+
+    let options = ExportOptions {
+        output_dir,
+        grade_filter: filter,
+        organization: org,
+        trash_bad,
+    };
+
+    let count =
+        crate::organizer::export::export_photos(&project, &options, |current, total| {
+            let _ = on_progress.send(ProgressPayload {
+                current,
+                total,
+                message: "Exporting photos...".into(),
+            });
+        })?;
+
+    Ok(count)
 }

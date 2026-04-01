@@ -5,6 +5,13 @@
   import Filmstrip from './Filmstrip.svelte';
   import StatusBar from './StatusBar.svelte';
   import ThumbnailProgress from './ThumbnailProgress.svelte';
+  import ExportDialog from './ExportDialog.svelte';
+
+  let exportDialog: ReturnType<typeof ExportDialog> | undefined = $state();
+
+  export function openExport() {
+    exportDialog?.show();
+  }
 </script>
 
 <div class="h-screen w-screen grid overflow-hidden" style="grid-template-columns: 260px 1fr; grid-template-rows: 48px 1fr 32px;">
@@ -15,7 +22,7 @@
 
   <!-- Toolbar -->
   <div>
-    <Toolbar />
+    <Toolbar onexport={() => exportDialog?.show()} />
   </div>
 
   <!-- Main content: Photo viewer + Filmstrip -->
@@ -32,3 +39,5 @@
     <StatusBar />
   </div>
 </div>
+
+<ExportDialog bind:this={exportDialog} />
