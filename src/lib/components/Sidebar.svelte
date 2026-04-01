@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Separator } from '$lib/components/ui/separator';
+  import { fade } from 'svelte/transition';
   import { currentProject, gradeCounts, activePerson, currentIndex } from '$lib/stores/project';
 </script>
 
@@ -38,31 +39,33 @@
 
       <!-- Person list (scrollable) -->
       <div class="mt-1 overflow-y-auto flex-1 space-y-0.5">
-        {#each $currentProject.clusters as cluster}
-          <button
-            class="w-full flex items-center gap-3 px-2 py-1.5 rounded text-xs text-left transition-colors"
-            class:bg-accent-muted={$activePerson === cluster.id}
-            class:text-accent={$activePerson === cluster.id}
-            class:border-l-2={$activePerson === cluster.id}
-            class:border-accent={$activePerson === cluster.id}
-            class:text-zinc-300={$activePerson !== cluster.id}
-            class:hover:bg-zinc-800={$activePerson !== cluster.id}
-            onclick={() => { activePerson.set(cluster.id); currentIndex.set(0); }}
-          >
-            <!-- Face thumbnail (small circle) -->
-            <div class="w-8 h-8 rounded-full bg-surface-overlay overflow-hidden flex-shrink-0">
-              <div class="w-full h-full flex items-center justify-center text-zinc-500 text-[10px] font-medium">
-                {cluster.label.charAt(0).toUpperCase()}
+        {#each $currentProject.clusters as cluster (cluster.id)}
+          <div transition:fade={{ duration: 200 }}>
+            <button
+              class="w-full flex items-center gap-3 px-2 py-1.5 rounded text-xs text-left transition-colors"
+              class:bg-accent-muted={$activePerson === cluster.id}
+              class:text-accent={$activePerson === cluster.id}
+              class:border-l-2={$activePerson === cluster.id}
+              class:border-accent={$activePerson === cluster.id}
+              class:text-zinc-300={$activePerson !== cluster.id}
+              class:hover:bg-zinc-800={$activePerson !== cluster.id}
+              onclick={() => { activePerson.set(cluster.id); currentIndex.set(0); }}
+            >
+              <!-- Face thumbnail (small circle) -->
+              <div class="w-8 h-8 rounded-full bg-surface-overlay overflow-hidden flex-shrink-0">
+                <div class="w-full h-full flex items-center justify-center text-zinc-500 text-[10px] font-medium">
+                  {cluster.label.charAt(0).toUpperCase()}
+                </div>
               </div>
-            </div>
-            <span class="font-medium truncate">{cluster.label}</span>
-            <span class="ml-auto text-zinc-500 font-mono flex-shrink-0">{cluster.photo_count}</span>
-          </button>
+              <span class="font-medium truncate">{cluster.label}</span>
+              <span class="ml-auto text-zinc-500 font-mono flex-shrink-0">{cluster.photo_count}</span>
+            </button>
+          </div>
         {/each}
       </div>
     {:else}
       <p class="text-xs text-zinc-500 italic">
-        Detect faces to see people
+        No people detected
       </p>
     {/if}
   </div>
