@@ -39,6 +39,7 @@ export const currentIndex = writable<number>(0);
 export const viewMode = writable<'timeline' | 'people'>('timeline');
 export const activePerson = writable<number | null>(null);
 export const thumbnailProgress = writable<number | null>(null);
+export const fullscreen = writable<boolean>(false);
 
 // Derived stores
 

@@ -6,12 +6,18 @@
     navigateNext,
     navigatePrev,
     updatePhotoGrade,
+    fullscreen,
+    viewMode,
+    activePerson,
+    currentIndex,
     type Photo,
   } from '$lib/stores/project';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
   import AppShell from '$lib/components/AppShell.svelte';
+  import ShortcutOverlay from '$lib/components/ShortcutOverlay.svelte';
 
   let appShell: ReturnType<typeof AppShell> | undefined = $state();
+  let shortcutsOpen = $state(false);
 
   async function setGrade(grade: Photo['grade']) {
     const project = $currentProject;
@@ -70,6 +76,38 @@
       case '0':
         setGrade('Ungraded');
         break;
+      case '?':
+        shortcutsOpen = !shortcutsOpen;
+        break;
+      case 'f':
+      case 'F':
+        if (!e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          fullscreen.update((v) => !v);
+        }
+        break;
+      case 't':
+      case 'T':
+        if (!e.metaKey && !e.ctrlKey) {
+          viewMode.set('timeline');
+          activePerson.set(null);
+          currentIndex.set(0);
+        }
+        break;
+      case 'p':
+      case 'P':
+        if (!e.metaKey && !e.ctrlKey) {
+          const hasClusters = ($currentProject?.clusters?.length ?? 0) > 0;
+          if (hasClusters) {
+            viewMode.set('people');
+          }
+        }
+        break;
+      case 'Escape':
+        if ($fullscreen) {
+          fullscreen.set(false);
+        }
+        break;
     }
   }
 </script>
@@ -81,3 +119,5 @@
 {:else}
   <WelcomeScreen />
 {/if}
+
+<ShortcutOverlay bind:open={shortcutsOpen} />

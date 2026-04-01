@@ -6,6 +6,7 @@
   import StatusBar from './StatusBar.svelte';
   import ThumbnailProgress from './ThumbnailProgress.svelte';
   import ExportDialog from './ExportDialog.svelte';
+  import { fullscreen } from '$lib/stores/project';
 
   let exportDialog: ReturnType<typeof ExportDialog> | undefined = $state();
 
@@ -14,30 +15,37 @@
   }
 </script>
 
-<div class="h-screen w-screen grid overflow-hidden" style="grid-template-columns: 260px 1fr; grid-template-rows: 48px 1fr 32px;">
-  <!-- Sidebar spans all rows -->
-  <div class="row-span-3 h-full overflow-hidden">
-    <Sidebar />
+{#if $fullscreen}
+  <!-- Fullscreen: photo only, black background -->
+  <div class="h-screen w-screen bg-black">
+    <PhotoViewer />
   </div>
-
-  <!-- Toolbar -->
-  <div>
-    <Toolbar onexport={() => exportDialog?.show()} />
-  </div>
-
-  <!-- Main content: Photo viewer + Filmstrip -->
-  <div class="flex flex-col overflow-hidden relative">
-    <div class="flex-1 min-h-0">
-      <PhotoViewer />
+{:else}
+  <div class="h-screen w-screen grid overflow-hidden" style="grid-template-columns: 260px 1fr; grid-template-rows: 48px 1fr 32px;">
+    <!-- Sidebar spans all rows -->
+    <div class="row-span-3 h-full overflow-hidden">
+      <Sidebar />
     </div>
-    <Filmstrip />
-    <ThumbnailProgress />
-  </div>
 
-  <!-- Status bar -->
-  <div>
-    <StatusBar />
+    <!-- Toolbar -->
+    <div>
+      <Toolbar onexport={() => exportDialog?.show()} />
+    </div>
+
+    <!-- Main content: Photo viewer + Filmstrip -->
+    <div class="flex flex-col overflow-hidden relative">
+      <div class="flex-1 min-h-0">
+        <PhotoViewer />
+      </div>
+      <Filmstrip />
+      <ThumbnailProgress />
+    </div>
+
+    <!-- Status bar -->
+    <div>
+      <StatusBar />
+    </div>
   </div>
-</div>
+{/if}
 
 <ExportDialog bind:this={exportDialog} />

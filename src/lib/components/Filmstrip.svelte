@@ -5,6 +5,10 @@
   let scrollContainer: HTMLDivElement | undefined = $state();
   let thumbnailPaths = $state<Map<string, string>>(new Map());
 
+  // Track last grade per photo to detect changes and trigger pulse
+  let lastGrades = $state<Map<string, Photo['grade']>>(new Map());
+  let pulsingPhotos = $state<Set<string>>(new Set());
+
   // Load thumbnail paths for all photos
   $effect(() => {
     const project = $currentProject;
@@ -28,6 +32,31 @@
     };
 
     loadThumbnails();
+  });
+
+  // Detect grade changes and trigger pulse
+  $effect(() => {
+    const photos = $filteredPhotos;
+    const newPulsing = new Set<string>();
+    const newGrades = new Map<string, Photo['grade']>();
+
+    for (const photo of photos) {
+      const prev = lastGrades.get(photo.path);
+      newGrades.set(photo.path, photo.grade);
+      if (prev !== undefined && prev !== photo.grade) {
+        newPulsing.add(photo.path);
+      }
+    }
+
+    lastGrades = newGrades;
+
+    if (newPulsing.size > 0) {
+      pulsingPhotos = newPulsing;
+      // Clear pulsing after animation completes
+      setTimeout(() => {
+        pulsingPhotos = new Set();
+      }, 400);
+    }
   });
 
   // Auto-scroll to current thumbnail
@@ -93,9 +122,24 @@
           {/if}
 
           <!-- Grade indicator bar -->
-          <div class="absolute bottom-0 left-0 right-0 h-[3px] {gradeColor(photo.grade)}"></div>
+          <div
+            class="absolute bottom-0 left-0 right-0 h-[3px] {gradeColor(photo.grade)}"
+            class:grade-pulse={pulsingPhotos.has(photo.path)}
+          ></div>
         </button>
       {/each}
     {/if}
   </div>
 </div>
+
+<style>
+  @keyframes grade-pulse {
+    0% { opacity: 1; transform: scaleX(1); }
+    50% { opacity: 0.5; transform: scaleX(1.05); }
+    100% { opacity: 1; transform: scaleX(1); }
+  }
+
+  .grade-pulse {
+    animation: grade-pulse 0.4s ease-in-out;
+  }
+</style>
