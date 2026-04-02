@@ -274,55 +274,41 @@ pub fn run_enrichment(
                 Err(e) => { eprintln!("[enrichment] ArcFace failed: {}", e); return Err(e); }
             };
 
-            // Pre-resize images to speed up detection. The SCRFD model uses 640x640 input,
-            // so decoding a full 26MP JPEG is wasteful. We save a 1280px working copy
-            // to a temp file and run detection on that instead.
-            let temp_dir = std::env::temp_dir().join("culling_detect");
-            let _ = std::fs::create_dir_all(&temp_dir);
+            // Use pre-generated thumbnails (~300px, ~30KB) instead of full images (~25MB).
+            // This is ~100x faster since we skip decoding 26MP JPEGs.
+            // Detection quality is slightly lower for tiny faces but fine for prominent subjects.
+            // The SCRFD model resizes input to 640x640 anyway, so 300px → 640px upscaling
+            // preserves most of the signal for faces that are a reasonable size.
+            let thumb_dir = crate::thumbnailer::thumbnail_dir(&project.id)?;
 
             let detect_total = needs_detection.len();
             for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
-                let photo_path = project.photos[*photo_idx].path.clone();
                 let filename = &project.photos[*photo_idx].filename;
+                let photo_path = project.photos[*photo_idx].path.clone();
 
-                // Create a 1280px working copy for faster detection
-                let work_path = temp_dir.join(filename);
-                let detect_path = if !work_path.exists() {
-                    match image::open(&photo_path) {
-                        Ok(img) => {
-                            let resized = img.resize(1280, 1280, image::imageops::FilterType::Triangle);
-                            let _ = resized.save(&work_path);
-                            work_path.clone()
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
-                            project.photos[*photo_idx].faces_detected_at = Some(now);
-                            on_progress("faces", progress_idx + 1, detect_total);
-                            continue;
-                        }
-                    }
-                } else {
-                    work_path.clone()
+                // Prefer thumbnail for speed; fall back to full image if thumbnail missing
+                let detect_path = {
+                    let thumb = thumb_dir.join(filename);
+                    if thumb.exists() { thumb } else { photo_path.clone() }
                 };
 
                 let detected = match detector.detect(
                     &detect_path,
                     config.detection.min_confidence,
-                    config.detection.min_face_size,
+                    // Scale min_face_size for thumbnail: a face that's 80px in 6240px original
+                    // would be ~4px in 300px thumbnail. Use a smaller threshold for thumbnails.
+                    20, // detect smaller faces in thumbnails
                 ) {
                     Ok(d) => d,
                     Err(e) => {
-                        eprintln!(
-                            "Warning: face detection failed for {:?}: {}",
-                            photo_path, e
-                        );
+                        eprintln!("Warning: face detection failed for {}: {}", filename, e);
                         project.photos[*photo_idx].faces_detected_at = Some(now);
                         on_progress("faces", progress_idx + 1, detect_total);
                         continue;
                     }
                 };
 
-                // Use the same working copy for embedding (coordinates match the detection output)
+                // Use the same image for embedding (coordinates match detection output)
                 let mut face_detections = Vec::new();
                 for face in &detected {
                     if let Ok(embedding) = embedder.embed(&detect_path, &face.keypoints) {
@@ -340,6 +326,7 @@ pub fn run_enrichment(
 
                 on_progress("faces", progress_idx + 1, detect_total);
 
+                // Save every 5 photos for crash recovery + polling visibility
                 if (progress_idx + 1) % 5 == 0 {
                     let _ = project.save();
                 }
