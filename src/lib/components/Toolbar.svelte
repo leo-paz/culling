@@ -1,20 +1,10 @@
 <script lang="ts">
-  import { get } from 'svelte/store';
-  import { invoke, Channel } from '@tauri-apps/api/core';
-  import { Button } from '$lib/components/ui/button';
   import * as Tabs from '$lib/components/ui/tabs';
   import * as Tooltip from '$lib/components/ui/tooltip';
-  import { viewMode, currentProject, activePerson, currentIndex, type Project } from '$lib/stores/project';
+  import { Button } from '$lib/components/ui/button';
+  import { viewMode, currentProject, activePerson, currentIndex, enrichmentStatus } from '$lib/stores/project';
 
   let { onexport = () => {} }: { onexport?: () => void } = $props();
-
-  let detecting = $state(false);
-  let detectProgress = $state<{ current: number; total: number; message: string } | null>(null);
-  let detectError = $state<string | null>(null);
-
-  let grading = $state(false);
-  let gradeProgress = $state<{ current: number; total: number; message: string } | null>(null);
-  let gradeError = $state<string | null>(null);
 
   let hasClusters = $derived(
     ($currentProject?.clusters?.length ?? 0) > 0
@@ -31,60 +21,6 @@
     }
     prevViewMode = mode;
   });
-
-  async function startFaceDetection() {
-    const project = get(currentProject);
-    if (!project) return;
-
-    detecting = true;
-    detectProgress = null;
-    const onProgress = new Channel<{ current: number; total: number; message: string }>();
-    onProgress.onmessage = (p) => {
-      detectProgress = p;
-    };
-
-    try {
-      detectError = null;
-      const updated = await invoke<Project>('start_face_detection', {
-        projectId: project.id,
-        onProgress,
-      });
-      currentProject.set(updated);
-    } catch (e) {
-      detectError = String(e);
-      console.error('Face detection failed:', e);
-    } finally {
-      detecting = false;
-      detectProgress = null;
-    }
-  }
-
-  async function startAutoGrade() {
-    const project = get(currentProject);
-    if (!project) return;
-
-    grading = true;
-    gradeProgress = null;
-    const onProgress = new Channel<{ current: number; total: number; message: string }>();
-    onProgress.onmessage = (p) => {
-      gradeProgress = p;
-    };
-
-    try {
-      gradeError = null;
-      const updated = await invoke<Project>('start_auto_grade', {
-        projectId: project.id,
-        onProgress,
-      });
-      currentProject.set(updated);
-    } catch (e) {
-      gradeError = String(e);
-      console.error('Auto-grade failed:', e);
-    } finally {
-      grading = false;
-      gradeProgress = null;
-    }
-  }
 </script>
 
 <header class="relative flex items-center justify-between bg-surface-raised border-b border-zinc-800 px-3 h-12">
@@ -98,76 +34,17 @@
     </Tabs.Root>
   </div>
 
-  <!-- Center: Action Buttons -->
+  <!-- Center: Enrichment Status -->
   <div class="flex items-center gap-2">
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        {#if detecting}
-          <Button variant="outline" size="sm" disabled class="text-xs border-zinc-700 text-zinc-400">
-            {#if detectProgress}
-              Detecting... {detectProgress.current}/{detectProgress.total}
-            {:else}
-              Detecting...
-            {/if}
-          </Button>
-        {:else}
-          <Button
-            variant="outline"
-            size="sm"
-            class="text-xs border-zinc-700 text-zinc-300 hover:text-zinc-100"
-            disabled={!$currentProject || hasClusters}
-            onclick={startFaceDetection}
-          >
-            {hasClusters ? 'Faces Detected' : 'Detect Faces'}
-          </Button>
-        {/if}
-      </Tooltip.Trigger>
-      <Tooltip.Content>
-        <p>{hasClusters ? 'Face detection already completed' : 'Detect and cluster faces in all photos'}</p>
-      </Tooltip.Content>
-    </Tooltip.Root>
-
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        {#if grading}
-          <Button variant="outline" size="sm" disabled class="text-xs border-zinc-700 text-zinc-400">
-            {#if gradeProgress}
-              Grading... {gradeProgress.current}/{gradeProgress.total}
-            {:else}
-              Grading...
-            {/if}
-          </Button>
-        {:else}
-          <Button
-            variant="outline"
-            size="sm"
-            class="text-xs border-zinc-700 text-zinc-300 hover:text-zinc-100"
-            disabled={!$currentProject}
-            onclick={startAutoGrade}
-          >
-            Auto-Grade
-          </Button>
-        {/if}
-      </Tooltip.Trigger>
-      <Tooltip.Content>
-        <p>Automatically grade photos based on quality heuristics</p>
-      </Tooltip.Content>
-    </Tooltip.Root>
+    {#if $enrichmentStatus.stage}
+      <span class="text-xs text-zinc-500">
+        {$enrichmentStatus.stage === 'thumbnails' ? 'Generating thumbnails' :
+         $enrichmentStatus.stage === 'grading' ? 'Grading' :
+         $enrichmentStatus.stage === 'faces' ? 'Detecting faces' : ''}...
+        {$enrichmentStatus.current}/{$enrichmentStatus.total}
+      </span>
+    {/if}
   </div>
-
-  <!-- Error messages -->
-  {#if detectError}
-    <div class="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded bg-grade-bad/20 border border-grade-bad/30 text-grade-bad text-xs max-w-md text-center">
-      {detectError}
-      <button class="ml-2 text-zinc-400 hover:text-zinc-200" onclick={() => detectError = null}>×</button>
-    </div>
-  {/if}
-  {#if gradeError}
-    <div class="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded bg-grade-bad/20 border border-grade-bad/30 text-grade-bad text-xs max-w-md text-center">
-      {gradeError}
-      <button class="ml-2 text-zinc-400 hover:text-zinc-200" onclick={() => gradeError = null}>×</button>
-    </div>
-  {/if}
 
   <!-- Right: Export -->
   <div class="flex items-center">

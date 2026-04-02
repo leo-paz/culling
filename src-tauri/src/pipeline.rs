@@ -1,165 +1,275 @@
-//! Core processing pipelines for face detection, grading, and export.
+//! Core processing pipelines for enrichment, face detection, grading, and export.
 //!
-//! This module contains the business logic that orchestrates detection,
-//! embedding, clustering, and grading. It is independent of Tauri and
-//! can be tested and used without the IPC layer.
+//! This module contains the business logic that orchestrates scanning,
+//! grading, detection, embedding, and clustering. It is independent of Tauri
+//! and can be tested and used without the IPC layer.
 
 use crate::config::Config;
 use crate::error::CullingError;
 use crate::models;
-use crate::project::{Cluster, FaceDetection, Grade, GradeSource, Project};
+use crate::project::{Cluster, FaceDetection, Grade, GradeSource, Photo, Project};
 use crate::scanner::cluster::cluster_embeddings;
 use crate::scanner::detector::FaceDetector;
 use crate::scanner::embedder::FaceEmbedder;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
+use std::io::Read;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Callback type for reporting progress from pipelines.
-pub type ProgressFn = Box<dyn Fn(usize, usize, &str) + Send + Sync>;
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "heic", "tif", "tiff"];
 
-/// Run face detection and clustering on all photos in a project.
-pub fn run_face_detection(
+fn is_image_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Compute a fast content hash (first 64KB) for change detection.
+/// Uses DefaultHasher to avoid adding a crypto dependency.
+pub fn compute_content_hash(path: &std::path::Path) -> Result<String, CullingError> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = vec![0u8; 65536];
+    let bytes_read = file.read(&mut buffer)?;
+    buffer.truncate(bytes_read);
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    buffer.hash(&mut hasher);
+    Ok(format!("{:016x}", hasher.finish()))
+}
+
+/// Progress callback that takes (stage_name, current, total).
+pub type EnrichmentProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
+
+/// Scan source folder and sync with project state.
+/// Returns the number of new photos added.
+pub fn scan_for_changes(project: &mut Project) -> Result<usize, CullingError> {
+    let source_dir = project.source_dir.clone();
+    if !source_dir.exists() {
+        return Ok(0);
+    }
+
+    // Get current files in folder
+    let current_files: HashSet<PathBuf> = walkdir::WalkDir::new(&source_dir)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file() && is_image_file(e.path()))
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    // Find new files (in folder but not in project)
+    let existing_paths: HashSet<PathBuf> = project.photos.iter().map(|p| p.path.clone()).collect();
+    let mut new_count = 0;
+
+    for file_path in &current_files {
+        if !existing_paths.contains(file_path) {
+            let filename = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let hash = compute_content_hash(file_path).ok();
+            project.photos.push(Photo {
+                path: file_path.clone(),
+                filename,
+                grade: Grade::default(),
+                grade_source: GradeSource::default(),
+                faces: Vec::new(),
+                aesthetic_score: None,
+                sharpness_score: None,
+                content_hash: hash,
+                graded_at: None,
+                faces_detected_at: None,
+            });
+            new_count += 1;
+        }
+    }
+
+    // Check for changed files (content_hash differs)
+    for photo in &mut project.photos {
+        if !current_files.contains(&photo.path) {
+            continue; // Missing file, skip
+        }
+        if let Ok(new_hash) = compute_content_hash(&photo.path) {
+            if photo.content_hash.as_deref() != Some(&new_hash) {
+                // File changed — reset processing timestamps
+                photo.content_hash = Some(new_hash);
+                if photo.grade_source != GradeSource::Manual {
+                    photo.graded_at = None;
+                    photo.grade = Grade::default();
+                    photo.grade_source = GradeSource::default();
+                    photo.aesthetic_score = None;
+                    photo.sharpness_score = None;
+                }
+                photo.faces_detected_at = None;
+                photo.faces.clear();
+            }
+        }
+    }
+
+    // Sort photos by filename
+    project.photos.sort_by(|a, b| a.filename.cmp(&b.filename));
+
+    Ok(new_count)
+}
+
+/// Run the full enrichment pipeline on a project.
+/// Only processes photos that need it (incremental).
+pub fn run_enrichment(
     project: &mut Project,
     config: &Config,
-    on_progress: &ProgressFn,
+    on_progress: &EnrichmentProgressFn,
 ) -> Result<(), CullingError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Stage 1: Auto-grade ungraded photos
+    let needs_grading: Vec<usize> = project
+        .photos
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.graded_at.is_none() && p.grade_source != GradeSource::Manual)
+        .map(|(i, _)| i)
+        .collect();
+
+    let grade_total = needs_grading.len();
+    for (progress_idx, photo_idx) in needs_grading.iter().enumerate() {
+        let photo_path = project.photos[*photo_idx].path.clone();
+
+        let heuristic = match crate::grader::heuristics::analyze(&photo_path, &config.grading) {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Warning: grading failed for {:?}: {}", photo_path, e);
+                // Mark as graded so we don't retry forever
+                project.photos[*photo_idx].graded_at = Some(now);
+                on_progress("grading", progress_idx + 1, grade_total);
+                continue;
+            }
+        };
+
+        project.photos[*photo_idx].sharpness_score = Some(heuristic.sharpness);
+
+        if heuristic.is_bad {
+            project.photos[*photo_idx].grade = Grade::Bad;
+        } else {
+            let aesthetic =
+                crate::grader::aesthetic::score_aesthetic(&photo_path).unwrap_or(5.0);
+            project.photos[*photo_idx].aesthetic_score = Some(aesthetic);
+            project.photos[*photo_idx].grade = if aesthetic >= config.grading.aesthetic_good_threshold
+            {
+                Grade::Good
+            } else {
+                Grade::Ok
+            };
+        }
+        project.photos[*photo_idx].grade_source = GradeSource::Auto;
+        project.photos[*photo_idx].graded_at = Some(now);
+
+        on_progress("grading", progress_idx + 1, grade_total);
+
+        // Save every 10 photos for crash recovery
+        if (progress_idx + 1) % 10 == 0 {
+            let _ = project.save();
+        }
+    }
+    if grade_total > 0 {
+        project.save()?;
+    }
+
+    // Stage 2: Face detection (only if models available)
     let det_path = models::detector_model_path()?;
     let emb_path = models::embedder_model_path()?;
 
-    if !det_path.exists() || !emb_path.exists() {
-        return Err(CullingError::ModelNotFound(
-            "Models not found. Download buffalo_l models to ~/.culling/models/".into(),
-        ));
-    }
+    if det_path.exists() && emb_path.exists() {
+        let needs_detection: Vec<usize> = project
+            .photos
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.faces_detected_at.is_none())
+            .map(|(i, _)| i)
+            .collect();
 
-    let mut detector = FaceDetector::new(&det_path)?;
-    let mut embedder = FaceEmbedder::new(&emb_path)?;
+        if !needs_detection.is_empty() {
+            let mut detector = FaceDetector::new(&det_path)?;
+            let mut embedder = FaceEmbedder::new(&emb_path)?;
 
-    let total = project.photos.len();
+            let detect_total = needs_detection.len();
+            for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
+                let photo_path = project.photos[*photo_idx].path.clone();
 
-    // Phase 1: Detect and embed
-    for i in 0..total {
-        let photo_path = project.photos[i].path.clone();
-        let detected = detector.detect(
-            &photo_path,
-            config.detection.min_confidence,
-            config.detection.min_face_size,
-        )?;
+                let detected = match detector.detect(
+                    &photo_path,
+                    config.detection.min_confidence,
+                    config.detection.min_face_size,
+                ) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: face detection failed for {:?}: {}",
+                            photo_path, e
+                        );
+                        project.photos[*photo_idx].faces_detected_at = Some(now);
+                        on_progress("faces", progress_idx + 1, detect_total);
+                        continue;
+                    }
+                };
 
-        let mut face_detections = Vec::new();
-        for face in &detected {
-            match embedder.embed(&photo_path, &face.keypoints) {
-                Ok(embedding) => {
-                    face_detections.push(FaceDetection {
-                        bbox: face.bbox,
-                        confidence: face.confidence,
-                        embedding,
-                        cluster_id: None,
-                    });
+                let mut face_detections = Vec::new();
+                for face in &detected {
+                    if let Ok(embedding) = embedder.embed(&photo_path, &face.keypoints) {
+                        face_detections.push(FaceDetection {
+                            bbox: face.bbox,
+                            confidence: face.confidence,
+                            embedding,
+                            cluster_id: None,
+                        });
+                    }
                 }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: failed to embed face in {}: {}",
-                        photo_path.display(),
-                        e
-                    );
+
+                project.photos[*photo_idx].faces = face_detections;
+                project.photos[*photo_idx].faces_detected_at = Some(now);
+
+                on_progress("faces", progress_idx + 1, detect_total);
+
+                if (progress_idx + 1) % 10 == 0 {
+                    let _ = project.save();
                 }
             }
-        }
 
-        project.photos[i].faces = face_detections;
-        on_progress(i + 1, total, "Detecting faces...");
-    }
+            // Re-cluster ALL faces (not just new ones) since clusters depend on the full set
+            let all_embeddings: Vec<&[f32]> = project
+                .photos
+                .iter()
+                .flat_map(|p| p.faces.iter().map(|f| f.embedding.as_slice()))
+                .collect();
 
-    // Phase 2: Cluster
-    let all_embeddings: Vec<&[f32]> = project
-        .photos
-        .iter()
-        .flat_map(|p| p.faces.iter().map(|f| f.embedding.as_slice()))
-        .collect();
+            if !all_embeddings.is_empty() {
+                let labels = cluster_embeddings(
+                    &all_embeddings,
+                    config.clustering.eps,
+                    config.clustering.min_samples,
+                )?;
 
-    if !all_embeddings.is_empty() {
-        let labels = cluster_embeddings(
-            &all_embeddings,
-            config.clustering.eps,
-            config.clustering.min_samples,
-        )?;
-
-        let mut label_idx = 0;
-        for photo in &mut project.photos {
-            for face in &mut photo.faces {
-                face.cluster_id = labels[label_idx];
-                label_idx += 1;
-            }
-        }
-
-        build_cluster_summaries(project);
-    }
-
-    project.save()?;
-    Ok(())
-}
-
-/// Run auto-grading on all ungraded photos.
-pub fn run_auto_grade(
-    project: &mut Project,
-    config: &Config,
-    on_progress: &ProgressFn,
-) -> Result<(), CullingError> {
-    let total = project.photos.len();
-
-    for i in 0..total {
-        if project.photos[i].grade != Grade::Ungraded {
-            on_progress(i + 1, total, "Grading photos...");
-            continue;
-        }
-
-        let photo_path = project.photos[i].path.clone();
-
-        let heuristic =
-            match crate::grader::heuristics::analyze(&photo_path, &config.grading) {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: heuristic analysis failed for {:?}: {}",
-                        photo_path, e
-                    );
-                    on_progress(i + 1, total, "Grading photos...");
-                    continue;
+                let mut label_idx = 0;
+                for photo in &mut project.photos {
+                    for face in &mut photo.faces {
+                        face.cluster_id = labels[label_idx];
+                        label_idx += 1;
+                    }
                 }
-            };
 
-        project.photos[i].sharpness_score = Some(heuristic.sharpness);
-
-        if heuristic.is_bad {
-            project.photos[i].grade = Grade::Bad;
-            project.photos[i].grade_source = GradeSource::Auto;
-        } else {
-            let aesthetic = match crate::grader::aesthetic::score_aesthetic(&photo_path) {
-                Ok(score) => score,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: aesthetic scoring failed for {:?}: {}",
-                        photo_path, e
-                    );
-                    5.0
-                }
-            };
-            project.photos[i].aesthetic_score = Some(aesthetic);
-
-            if aesthetic >= config.grading.aesthetic_good_threshold {
-                project.photos[i].grade = Grade::Good;
-            } else {
-                project.photos[i].grade = Grade::Ok;
+                build_cluster_summaries(project);
             }
-            project.photos[i].grade_source = GradeSource::Auto;
-        }
 
-        on_progress(i + 1, total, "Grading photos...");
+            project.save()?;
+        }
     }
 
-    project.save()?;
     Ok(())
 }
 

@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::ipc::Channel;
+use tauri::Emitter;
 use walkdir::WalkDir;
 
 use crate::config::Config;
 use crate::error::CullingError;
 use crate::organizer::export::{ExportOptions, GradeFilter, Organization};
-use crate::pipeline::{self, ProgressFn};
+use crate::pipeline;
 use crate::project::{Grade, GradeSource, Photo, Project};
 use crate::thumbnailer;
 
@@ -59,6 +60,9 @@ pub async fn import_folder(path: String) -> Result<Project, CullingError> {
             faces: Vec::new(),
             aesthetic_score: None,
             sharpness_score: None,
+            content_hash: pipeline::compute_content_hash(e.path()).ok(),
+            graded_at: None,
+            faces_detected_at: None,
         })
         .collect();
 
@@ -75,6 +79,16 @@ pub async fn import_folder(path: String) -> Result<Project, CullingError> {
 #[tauri::command]
 pub async fn get_project(id: String) -> Result<Project, CullingError> {
     Project::load(&id)
+}
+
+#[tauri::command]
+pub async fn open_project(id: String) -> Result<Project, CullingError> {
+    let mut project = Project::load(&id)?;
+    let new_count = pipeline::scan_for_changes(&mut project)?;
+    if new_count > 0 {
+        project.save()?;
+    }
+    Ok(project)
 }
 
 #[tauri::command]
@@ -101,51 +115,63 @@ pub async fn update_grade(
 }
 
 #[tauri::command]
-pub async fn start_face_detection(
+pub async fn start_enrichment(
+    app: tauri::AppHandle,
     project_id: String,
-    on_progress: Channel<ProgressPayload>,
-) -> Result<Project, CullingError> {
+) -> Result<(), CullingError> {
+    let app_for_thumbs = app.clone();
+    let app_for_progress = app.clone();
+    let app_for_complete = app.clone();
+
     tokio::task::spawn_blocking(move || {
         let mut project = Project::load(&project_id)?;
         let config = Config::load();
 
-        let progress: ProgressFn = Box::new(move |current, total, message| {
-            let _ = on_progress.send(ProgressPayload {
-                current,
-                total,
-                message: message.to_string(),
+        // Generate thumbnails for photos missing them
+        let thumb_max_size = config.thumbnails.max_size;
+        let photos_for_thumbs: Vec<(PathBuf, String)> = project
+            .photos
+            .iter()
+            .map(|p| (p.path.clone(), p.filename.clone()))
+            .collect();
+        let _ = thumbnailer::generate_all_thumbnails(
+            &photos_for_thumbs,
+            &project_id,
+            thumb_max_size,
+            |current, total| {
+                let _ = app_for_thumbs.emit(
+                    "enrichment:progress",
+                    serde_json::json!({
+                        "stage": "thumbnails",
+                        "current": current,
+                        "total": total,
+                    }),
+                );
+            },
+        );
+
+        // Run grading + face detection
+        let progress: pipeline::EnrichmentProgressFn =
+            Box::new(move |stage, current, total| {
+                let _ = app_for_progress.emit(
+                    "enrichment:progress",
+                    serde_json::json!({
+                        "stage": stage,
+                        "current": current,
+                        "total": total,
+                    }),
+                );
             });
-        });
 
-        pipeline::run_face_detection(&mut project, &config, &progress)?;
-        Ok(project)
-    })
-    .await
-    .map_err(|e| CullingError::Other(format!("Task panicked: {}", e)))?
-}
+        pipeline::run_enrichment(&mut project, &config, &progress)?;
 
-#[tauri::command]
-pub async fn start_auto_grade(
-    project_id: String,
-    on_progress: Channel<ProgressPayload>,
-) -> Result<Project, CullingError> {
-    tokio::task::spawn_blocking(move || {
-        let mut project = Project::load(&project_id)?;
-        let config = Config::load();
+        // Emit completion with the updated project
+        let _ = app_for_complete.emit("enrichment:complete", &project);
 
-        let progress: ProgressFn = Box::new(move |current, total, message| {
-            let _ = on_progress.send(ProgressPayload {
-                current,
-                total,
-                message: message.to_string(),
-            });
-        });
+        Ok::<(), CullingError>(())
+    });
 
-        pipeline::run_auto_grade(&mut project, &config, &progress)?;
-        Ok(project)
-    })
-    .await
-    .map_err(|e| CullingError::Other(format!("Task panicked: {}", e)))?
+    Ok(())
 }
 
 #[tauri::command]

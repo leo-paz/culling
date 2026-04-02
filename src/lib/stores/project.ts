@@ -15,6 +15,15 @@ export interface Photo {
   faces: FaceDetection[];
   aesthetic_score: number | null;
   sharpness_score: number | null;
+  content_hash: string | null;
+  graded_at: number | null;
+  faces_detected_at: number | null;
+}
+
+export interface EnrichmentStatus {
+  stage: 'thumbnails' | 'grading' | 'faces' | null;
+  current: number;
+  total: number;
 }
 
 export interface Cluster {
@@ -40,6 +49,7 @@ export const viewMode = writable<'timeline' | 'people'>('timeline');
 export const activePerson = writable<number | null>(null);
 export const thumbnailProgress = writable<number | null>(null);
 export const fullscreen = writable<boolean>(false);
+export const enrichmentStatus = writable<EnrichmentStatus>({ stage: null, current: 0, total: 0 });
 
 // Derived stores
 

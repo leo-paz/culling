@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+  import { onMount } from 'svelte';
   import {
     currentProject,
     currentPhoto,
@@ -10,7 +12,9 @@
     viewMode,
     activePerson,
     currentIndex,
+    enrichmentStatus,
     type Photo,
+    type Project,
   } from '$lib/stores/project';
   import WelcomeScreen from '$lib/components/WelcomeScreen.svelte';
   import AppShell from '$lib/components/AppShell.svelte';
@@ -18,6 +22,31 @@
 
   let appShell: ReturnType<typeof AppShell> | undefined = $state();
   let shortcutsOpen = $state(false);
+
+  // Listen for enrichment events from the Rust backend
+  onMount(() => {
+    const unlistenProgress = listen<{ stage: string; current: number; total: number }>(
+      'enrichment:progress',
+      (event) => {
+        const { stage, current, total } = event.payload;
+        enrichmentStatus.set({
+          stage: stage as 'thumbnails' | 'grading' | 'faces',
+          current,
+          total,
+        });
+      }
+    );
+
+    const unlistenComplete = listen<Project>('enrichment:complete', (event) => {
+      enrichmentStatus.set({ stage: null, current: 0, total: 0 });
+      currentProject.set(event.payload);
+    });
+
+    return () => {
+      unlistenProgress.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+    };
+  });
 
   async function setGrade(grade: Photo['grade']) {
     const project = $currentProject;
