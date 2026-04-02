@@ -3,7 +3,6 @@
 use crate::config::GradingConfig;
 use crate::error::CullingError;
 use image::DynamicImage;
-use std::path::Path;
 
 pub struct HeuristicResult {
     pub sharpness: f32,
@@ -11,12 +10,6 @@ pub struct HeuristicResult {
     pub is_overexposed: bool,
     pub is_underexposed: bool,
     pub is_bad: bool, // true if any heuristic flags it
-}
-
-/// Run all heuristic checks on an image loaded from disk.
-pub fn analyze(image_path: &Path, config: &GradingConfig) -> Result<HeuristicResult, CullingError> {
-    let img = image::open(image_path)?;
-    analyze_image(&img, config)
 }
 
 /// Run all heuristic checks on a pre-loaded image (avoids redundant disk I/O).

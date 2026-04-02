@@ -267,27 +267,6 @@ pub async fn export_photos(
     Ok(count)
 }
 
-/// Read an image file and return it as a base64 data URL.
-/// This bypasses the asset protocol entirely.
-#[tauri::command]
-pub async fn read_image(path: String) -> Result<String, CullingError> {
-    use std::fs;
-    let data = fs::read(&path)?;
-    let ext = std::path::Path::new(&path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("jpeg")
-        .to_lowercase();
-    let mime = match ext.as_str() {
-        "png" => "image/png",
-        "tif" | "tiff" => "image/tiff",
-        _ => "image/jpeg",
-    };
-    use base64::Engine;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
-    Ok(format!("data:{};base64,{}", mime, b64))
-}
-
 #[tauri::command]
 pub async fn get_config() -> Config {
     Config::load()

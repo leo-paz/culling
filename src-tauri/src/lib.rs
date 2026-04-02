@@ -33,7 +33,6 @@ pub fn run() {
             commands::get_thumbnail_path,
             commands::check_models,
             commands::export_photos,
-            commands::read_image,
             commands::get_config,
             commands::update_config,
         ])

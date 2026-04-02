@@ -249,8 +249,6 @@ pub fn run_enrichment(
     let det_path = models::detector_model_path()?;
     let emb_path = models::embedder_model_path()?;
 
-    eprintln!("[enrichment] Stage 2: det_path={:?} exists={}, emb_path={:?} exists={}", det_path, det_path.exists(), emb_path, emb_path.exists());
-
     if det_path.exists() && emb_path.exists() {
         let needs_detection: Vec<usize> = project
             .photos
@@ -260,19 +258,9 @@ pub fn run_enrichment(
             .map(|(i, _)| i)
             .collect();
 
-        eprintln!("[enrichment] Need to detect faces in {} photos", needs_detection.len());
-
         if !needs_detection.is_empty() {
-            eprintln!("[enrichment] Loading SCRFD detector...");
-            let mut detector = match FaceDetector::new(&det_path) {
-                Ok(d) => { eprintln!("[enrichment] SCRFD loaded OK"); d },
-                Err(e) => { eprintln!("[enrichment] SCRFD failed: {}", e); return Err(e); }
-            };
-            eprintln!("[enrichment] Loading ArcFace embedder...");
-            let mut embedder = match FaceEmbedder::new(&emb_path) {
-                Ok(e) => { eprintln!("[enrichment] ArcFace loaded OK"); e },
-                Err(e) => { eprintln!("[enrichment] ArcFace failed: {}", e); return Err(e); }
-            };
+            let mut detector = FaceDetector::new(&det_path)?;
+            let mut embedder = FaceEmbedder::new(&emb_path)?;
 
             // Use 1280px working copies generated during the thumbnail stage.
             // These are ~200KB JPEGs (vs 25MB originals) but have enough resolution
@@ -284,16 +272,11 @@ pub fn run_enrichment(
                 let filename = project.photos[*photo_idx].filename.clone();
                 let photo_path = project.photos[*photo_idx].path.clone();
 
-                let t0 = std::time::Instant::now();
-
                 // Use 1280px working copy; fall back to full image if missing
                 let detect_path = {
                     let work = work_dir.join(&filename);
                     if work.exists() { work } else { photo_path.clone() }
                 };
-
-                eprintln!("[enrichment] Processing {}/{}: {} (path: {:?})",
-                    progress_idx + 1, detect_total, filename, detect_path);
 
                 let detected = match detector.detect(
                     &detect_path,
@@ -311,8 +294,6 @@ pub fn run_enrichment(
 
                 // Cap faces per photo — more than 30 is almost certainly false positives
                 let detected = if detected.len() > 30 {
-                    eprintln!("[enrichment] {} has {} detections — capping to top 30 by confidence",
-                        filename, detected.len());
                     let mut sorted = detected;
                     sorted.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
                     sorted.truncate(30);
@@ -336,9 +317,6 @@ pub fn run_enrichment(
 
                 project.photos[*photo_idx].faces = face_detections;
                 project.photos[*photo_idx].faces_detected_at = Some(now);
-
-                eprintln!("[enrichment] {} done in {:.1}s — {} faces",
-                    filename, t0.elapsed().as_secs_f64(), project.photos[*photo_idx].faces.len());
 
                 on_progress("faces", progress_idx + 1, detect_total);
 
