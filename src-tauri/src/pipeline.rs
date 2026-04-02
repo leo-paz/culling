@@ -235,7 +235,17 @@ pub fn run_enrichment(
         project.save()?;
     }
 
-    // Stage 2: Face detection (only if models available)
+    // Stage 2: Face detection — auto-download models if needed
+    match crate::models::ensure_models(|msg, current, total| {
+        on_progress(msg, current as usize, total as usize);
+    }) {
+        Ok(_) => {}
+        Err(e) => {
+            // Download failed (offline, etc.) — skip face detection silently
+            eprintln!("Model download skipped: {}", e);
+        }
+    }
+
     let det_path = models::detector_model_path()?;
     let emb_path = models::embedder_model_path()?;
 

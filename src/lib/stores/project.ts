@@ -22,7 +22,7 @@ export interface Photo {
 }
 
 export interface EnrichmentStatus {
-  stage: 'thumbnails' | 'grading' | 'faces' | null;
+  stage: 'thumbnails' | 'grading' | 'faces' | 'downloading' | null;
   current: number;
   total: number;
 }
