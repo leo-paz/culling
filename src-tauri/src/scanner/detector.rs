@@ -105,8 +105,8 @@ fn preprocess(
     let new_w = (orig_w as f32 * scale) as u32;
     let new_h = (orig_h as f32 * scale) as u32;
 
-    // Resize (preserving aspect ratio)
-    let resized = img.resize(new_w, new_h, image::imageops::FilterType::Triangle);
+    // Resize to exact dimensions (not preserve-aspect — we already computed the right size)
+    let resized = img.resize_exact(new_w, new_h, image::imageops::FilterType::Triangle);
     let rgb = resized.to_rgb8();
 
     // Create padded image (black background)
@@ -115,10 +115,13 @@ fn preprocess(
     let pad_y = (target_h - new_h) / 2;
 
     // Copy resized image onto padded canvas
-    for y in 0..new_h {
-        for x in 0..new_w {
+    let (actual_w, actual_h) = (rgb.width(), rgb.height());
+    for y in 0..actual_h {
+        for x in 0..actual_w {
             let pixel = rgb.get_pixel(x, y);
-            padded.put_pixel(x + pad_x, y + pad_y, *pixel);
+            if x + pad_x < target_w && y + pad_y < target_h {
+                padded.put_pixel(x + pad_x, y + pad_y, *pixel);
+            }
         }
     }
 

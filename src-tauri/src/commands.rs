@@ -177,10 +177,15 @@ pub async fn start_enrichment(
                 );
             });
 
-        pipeline::run_enrichment(&mut project, &config, &progress, &photo_graded)?;
+        // Run enrichment — if it fails, still emit completion with whatever progress was made
+        if let Err(e) = pipeline::run_enrichment(&mut project, &config, &progress, &photo_graded) {
+            eprintln!("Enrichment error (continuing): {}", e);
+        }
 
-        // Emit completion with the updated project
-        let _ = app_for_complete.emit("enrichment:complete", &project);
+        // Always emit completion so the UI never gets stuck
+        // Reload from disk in case the pipeline saved partial progress
+        let final_project = Project::load(&project_id).unwrap_or(project);
+        let _ = app_for_complete.emit("enrichment:complete", &final_project);
 
         Ok::<(), CullingError>(())
     });
