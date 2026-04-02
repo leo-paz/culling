@@ -227,7 +227,7 @@ pub fn run_enrichment(
         on_progress("grading", progress_idx + 1, grade_total);
 
         // Save every 10 photos for crash recovery
-        if (progress_idx + 1) % 10 == 0 {
+        if (progress_idx + 1) % 5 == 0 {
             let _ = project.save();
         }
     }
@@ -274,12 +274,39 @@ pub fn run_enrichment(
                 Err(e) => { eprintln!("[enrichment] ArcFace failed: {}", e); return Err(e); }
             };
 
+            // Pre-resize images to speed up detection. The SCRFD model uses 640x640 input,
+            // so decoding a full 26MP JPEG is wasteful. We save a 1280px working copy
+            // to a temp file and run detection on that instead.
+            let temp_dir = std::env::temp_dir().join("culling_detect");
+            let _ = std::fs::create_dir_all(&temp_dir);
+
             let detect_total = needs_detection.len();
             for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
                 let photo_path = project.photos[*photo_idx].path.clone();
+                let filename = &project.photos[*photo_idx].filename;
+
+                // Create a 1280px working copy for faster detection
+                let work_path = temp_dir.join(filename);
+                let detect_path = if !work_path.exists() {
+                    match image::open(&photo_path) {
+                        Ok(img) => {
+                            let resized = img.resize(1280, 1280, image::imageops::FilterType::Triangle);
+                            let _ = resized.save(&work_path);
+                            work_path.clone()
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
+                            project.photos[*photo_idx].faces_detected_at = Some(now);
+                            on_progress("faces", progress_idx + 1, detect_total);
+                            continue;
+                        }
+                    }
+                } else {
+                    work_path.clone()
+                };
 
                 let detected = match detector.detect(
-                    &photo_path,
+                    &detect_path,
                     config.detection.min_confidence,
                     config.detection.min_face_size,
                 ) {
@@ -295,9 +322,10 @@ pub fn run_enrichment(
                     }
                 };
 
+                // Use the same working copy for embedding (coordinates match the detection output)
                 let mut face_detections = Vec::new();
                 for face in &detected {
-                    if let Ok(embedding) = embedder.embed(&photo_path, &face.keypoints) {
+                    if let Ok(embedding) = embedder.embed(&detect_path, &face.keypoints) {
                         face_detections.push(FaceDetection {
                             bbox: face.bbox,
                             confidence: face.confidence,
@@ -312,7 +340,7 @@ pub fn run_enrichment(
 
                 on_progress("faces", progress_idx + 1, detect_total);
 
-                if (progress_idx + 1) % 10 == 0 {
+                if (progress_idx + 1) % 5 == 0 {
                     let _ = project.save();
                 }
             }
