@@ -61,6 +61,22 @@ export const filteredPhotos = derived(
   ([$project, $person]) => {
     if (!$project) return [];
     if ($person === null) return $project.photos;
+
+    // Virtual cluster: "Groups" (photos with 2+ different people)
+    const CLUSTER_ID_GROUPS = Number.MAX_SAFE_INTEGER - 1;
+    // Virtual cluster: "Landscapes" (no faces detected)
+    const CLUSTER_ID_NO_PEOPLE = Number.MAX_SAFE_INTEGER - 2;
+
+    if ($person === CLUSTER_ID_GROUPS) {
+      return $project.photos.filter((p) => {
+        const uniqueClusters = new Set(p.faces.map(f => f.cluster_id).filter(id => id !== null));
+        return uniqueClusters.size > 1;
+      });
+    }
+    if ($person === CLUSTER_ID_NO_PEOPLE) {
+      return $project.photos.filter((p) => p.faces.length === 0 && p.faces_detected_at !== null);
+    }
+
     return $project.photos.filter((p) =>
       p.faces.some((f) => f.cluster_id === $person)
     );
