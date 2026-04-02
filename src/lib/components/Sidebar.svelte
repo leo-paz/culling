@@ -1,7 +1,15 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
   import { Separator } from '$lib/components/ui/separator';
   import { fade } from 'svelte/transition';
-  import { currentProject, gradeCounts, activePerson, currentIndex } from '$lib/stores/project';
+  import { currentProject, gradeCounts, activePerson, currentIndex, enrichmentStatus } from '$lib/stores/project';
+
+  let modelsAvailable = $state(false);
+  $effect(() => {
+    if ($currentProject) {
+      invoke<boolean>('check_models').then((v) => { modelsAvailable = v; }).catch(() => {});
+    }
+  });
 </script>
 
 <aside class="flex flex-col h-full bg-surface-raised border-r border-zinc-800 overflow-hidden">
@@ -64,9 +72,34 @@
         {/each}
       </div>
     {:else}
-      <p class="text-xs text-zinc-500 italic">
-        No people detected
-      </p>
+      <div class="space-y-2">
+        {#if $enrichmentStatus.stage === 'downloading'}
+          <p class="text-xs text-zinc-400">
+            Downloading face detection models...
+          </p>
+          <div class="h-1 bg-zinc-800 rounded overflow-hidden">
+            <div class="h-full bg-accent animate-pulse" style="width: 100%"></div>
+          </div>
+        {:else if $enrichmentStatus.stage === 'faces'}
+          <p class="text-xs text-zinc-400">
+            Detecting faces... {$enrichmentStatus.current}/{$enrichmentStatus.total}
+          </p>
+          <div class="h-1 bg-zinc-800 rounded overflow-hidden">
+            <div
+              class="h-full bg-accent transition-all duration-300"
+              style="width: {$enrichmentStatus.total > 0 ? ($enrichmentStatus.current / $enrichmentStatus.total * 100) : 0}%"
+            ></div>
+          </div>
+        {:else if !modelsAvailable}
+          <p class="text-xs text-zinc-500">
+            Face detection will be available when connected to the internet.
+          </p>
+        {:else}
+          <p class="text-xs text-zinc-500 italic">
+            No faces detected in these photos
+          </p>
+        {/if}
+      </div>
     {/if}
   </div>
 

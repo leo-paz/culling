@@ -29,8 +29,12 @@
       'enrichment:progress',
       (event) => {
         const { stage, current, total } = event.payload;
+        // Map model download progress messages to the 'downloading' stage
+        const normalizedStage = (stage.startsWith('Download') || stage.startsWith('Extract'))
+          ? 'downloading'
+          : stage;
         enrichmentStatus.set({
-          stage: stage as 'thumbnails' | 'grading' | 'faces',
+          stage: normalizedStage as 'thumbnails' | 'grading' | 'faces' | 'downloading',
           current,
           total,
         });
