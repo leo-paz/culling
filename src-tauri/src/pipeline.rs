@@ -283,21 +283,26 @@ pub fn run_enrichment(
 
             let detect_total = needs_detection.len();
             for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
-                let filename = &project.photos[*photo_idx].filename;
+                let filename = project.photos[*photo_idx].filename.clone();
                 let photo_path = project.photos[*photo_idx].path.clone();
+
+                let t0 = std::time::Instant::now();
 
                 // Prefer thumbnail for speed; fall back to full image if thumbnail missing
                 let detect_path = {
-                    let thumb = thumb_dir.join(filename);
+                    let thumb = thumb_dir.join(&filename);
                     if thumb.exists() { thumb } else { photo_path.clone() }
                 };
 
+                eprintln!("[enrichment] Processing {}/{}: {} (path: {:?})",
+                    progress_idx + 1, detect_total, filename, detect_path);
+
                 let detected = match detector.detect(
                     &detect_path,
-                    config.detection.min_confidence,
-                    // Scale min_face_size for thumbnail: a face that's 80px in 6240px original
-                    // would be ~4px in 300px thumbnail. Use a smaller threshold for thumbnails.
-                    20, // detect smaller faces in thumbnails
+                    // Use higher confidence on thumbnails to avoid false positives.
+                    // Upscaled thumbnails produce more noise than downscaled originals.
+                    0.7_f32.max(config.detection.min_confidence),
+                    config.detection.min_face_size,
                 ) {
                     Ok(d) => d,
                     Err(e) => {
@@ -306,6 +311,18 @@ pub fn run_enrichment(
                         on_progress("faces", progress_idx + 1, detect_total);
                         continue;
                     }
+                };
+
+                // Cap faces per photo — more than 30 is almost certainly false positives
+                let detected = if detected.len() > 30 {
+                    eprintln!("[enrichment] {} has {} detections — capping to top 30 by confidence",
+                        filename, detected.len());
+                    let mut sorted = detected;
+                    sorted.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+                    sorted.truncate(30);
+                    sorted
+                } else {
+                    detected
                 };
 
                 // Use the same image for embedding (coordinates match detection output)
@@ -323,6 +340,9 @@ pub fn run_enrichment(
 
                 project.photos[*photo_idx].faces = face_detections;
                 project.photos[*photo_idx].faces_detected_at = Some(now);
+
+                eprintln!("[enrichment] {} done in {:.1}s — {} faces",
+                    filename, t0.elapsed().as_secs_f64(), project.photos[*photo_idx].faces.len());
 
                 on_progress("faces", progress_idx + 1, detect_total);
 
