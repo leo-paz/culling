@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
   import * as Tabs from '$lib/components/ui/tabs';
   import * as Tooltip from '$lib/components/ui/tooltip';
   import { Button } from '$lib/components/ui/button';
@@ -8,6 +9,21 @@
 
   let hasClusters = $derived(
     ($currentProject?.clusters?.length ?? 0) > 0
+  );
+
+  let modelsAvailable = $state(false);
+  // Check if face detection models are installed
+  $effect(() => {
+    if ($currentProject) {
+      invoke<boolean>('check_models').then((v) => { modelsAvailable = v; }).catch(() => {});
+    }
+  });
+
+  let peopleTabReason = $derived(
+    hasClusters ? '' :
+    $enrichmentStatus.stage === 'faces' ? 'Face detection in progress...' :
+    !modelsAvailable ? 'Face detection models not installed' :
+    'No faces detected in photos'
   );
 
   // When switching back to timeline, reset person filter.
@@ -29,7 +45,16 @@
     <Tabs.Root bind:value={$viewMode}>
       <Tabs.List class="bg-surface-overlay h-7">
         <Tabs.Trigger value="timeline" class="text-xs px-3 h-6">Timeline</Tabs.Trigger>
-        <Tabs.Trigger value="people" class="text-xs px-3 h-6" disabled={!hasClusters}>People</Tabs.Trigger>
+        <Tooltip.Root>
+          <Tooltip.Trigger>
+            <Tabs.Trigger value="people" class="text-xs px-3 h-6" disabled={!hasClusters}>People</Tabs.Trigger>
+          </Tooltip.Trigger>
+          {#if !hasClusters && peopleTabReason}
+            <Tooltip.Content>
+              <p>{peopleTabReason}</p>
+            </Tooltip.Content>
+          {/if}
+        </Tooltip.Root>
       </Tabs.List>
     </Tabs.Root>
   </div>
