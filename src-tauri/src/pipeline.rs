@@ -84,6 +84,7 @@ pub fn scan_for_changes(project: &mut Project) -> Result<usize, CullingError> {
                 faces: Vec::new(),
                 aesthetic_score: None,
                 sharpness_score: None,
+                grade_reason: None,
                 content_hash: hash,
                 graded_at: None,
                 faces_detected_at: None,
@@ -142,41 +143,72 @@ pub fn run_enrichment(
         .map(|(i, _)| i)
         .collect();
 
+    // Try to use pre-generated thumbnails for grading (much faster than decoding full images).
+    // Thumbnails are ~300px and already on disk from the thumbnail generation stage.
+    let thumb_dir = crate::thumbnailer::thumbnail_dir(&project.id)?;
+
     let grade_total = needs_grading.len();
     for (progress_idx, photo_idx) in needs_grading.iter().enumerate() {
-        let photo_path = project.photos[*photo_idx].path.clone();
+        let photo = &project.photos[*photo_idx];
+        let photo_path = photo.path.clone();
+        let filename = photo.filename.clone();
 
-        // Open image ONCE and resize to working size for speed.
-        // Full 26MP Fuji JPGs are ~25MB to decode — a 800px working copy is sufficient
-        // for sharpness, exposure, and aesthetic analysis.
-        let img = match image::open(&photo_path) {
-            Ok(img) => img.resize(800, 800, image::imageops::FilterType::Triangle),
-            Err(e) => {
-                eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
-                project.photos[*photo_idx].graded_at = Some(now);
-                on_progress("grading", progress_idx + 1, grade_total);
-                continue;
+        // Prefer thumbnail (fast: ~300px already decoded) over full image (slow: 26MP decode)
+        let thumb_path = thumb_dir.join(&filename);
+        let img = if thumb_path.exists() {
+            match image::open(&thumb_path) {
+                Ok(img) => img,
+                Err(_) => match image::open(&photo_path) {
+                    Ok(img) => img.resize(800, 800, image::imageops::FilterType::Triangle),
+                    Err(e) => {
+                        eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
+                        project.photos[*photo_idx].graded_at = Some(now);
+                        on_progress("grading", progress_idx + 1, grade_total);
+                        continue;
+                    }
+                },
+            }
+        } else {
+            match image::open(&photo_path) {
+                Ok(img) => img.resize(800, 800, image::imageops::FilterType::Triangle),
+                Err(e) => {
+                    eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
+                    project.photos[*photo_idx].graded_at = Some(now);
+                    on_progress("grading", progress_idx + 1, grade_total);
+                    continue;
+                }
             }
         };
 
-        // Run heuristics and aesthetic on the same pre-loaded, resized image
+        // Run heuristics and aesthetic on the (small) image
         let heuristic = crate::grader::heuristics::analyze_image(&img, &config.grading)?;
         project.photos[*photo_idx].sharpness_score = Some(heuristic.sharpness);
 
-        let grade = if heuristic.is_bad {
-            Grade::Bad
+        let (grade, reason) = if heuristic.is_bad {
+            let mut reasons = Vec::new();
+            if heuristic.is_blurry {
+                reasons.push(format!("Blurry (sharpness: {:.0})", heuristic.sharpness));
+            }
+            if heuristic.is_overexposed {
+                reasons.push("Overexposed".to_string());
+            }
+            if heuristic.is_underexposed {
+                reasons.push("Underexposed".to_string());
+            }
+            (Grade::Bad, reasons.join(", "))
         } else {
             let aesthetic = crate::grader::aesthetic::score_aesthetic_image(&img);
             project.photos[*photo_idx].aesthetic_score = Some(aesthetic);
             if aesthetic >= config.grading.aesthetic_good_threshold {
-                Grade::Good
+                (Grade::Good, format!("Aesthetic score: {:.1}/10", aesthetic))
             } else {
-                Grade::Ok
+                (Grade::Ok, format!("Aesthetic score: {:.1}/10", aesthetic))
             }
         };
 
         project.photos[*photo_idx].grade = grade;
         project.photos[*photo_idx].grade_source = GradeSource::Auto;
+        project.photos[*photo_idx].grade_reason = Some(reason.clone());
         project.photos[*photo_idx].graded_at = Some(now);
 
         // Emit per-photo grade event so the UI updates in real-time
