@@ -297,12 +297,14 @@ pub fn run_enrichment(
                 eprintln!("[enrichment] Processing {}/{}: {} (path: {:?})",
                     progress_idx + 1, detect_total, filename, detect_path);
 
+                // On thumbnails (~300px), use a proportional min face size.
+                // A face that's 80px in a 6240px original is ~4px in a 300px thumbnail.
+                // Set minimum to 30px on thumbnails — this catches faces that are at least
+                // ~600px in the original (reasonable for a photo subject).
                 let detected = match detector.detect(
                     &detect_path,
-                    // Use higher confidence on thumbnails to avoid false positives.
-                    // Upscaled thumbnails produce more noise than downscaled originals.
-                    0.7_f32.max(config.detection.min_confidence),
-                    config.detection.min_face_size,
+                    config.detection.min_confidence,
+                    30,
                 ) {
                     Ok(d) => d,
                     Err(e) => {

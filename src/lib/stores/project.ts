@@ -106,14 +106,39 @@ export function navigateTo(index: number) {
 }
 
 /** Poll the project from disk every 3 seconds to pick up enrichment progress.
- *  Call this after starting enrichment. Stops when all processing is done. */
+ *  Call this after starting enrichment. Stops when all processing is done.
+ *  Only updates photos that actually changed (grade/faces) to avoid
+ *  re-triggering the photo viewer's {#key} block. */
 let _pollInterval: ReturnType<typeof setInterval> | null = null;
 export function startEnrichmentPolling(projectId: string) {
   if (_pollInterval) clearInterval(_pollInterval);
   _pollInterval = setInterval(async () => {
     try {
       const updated = await invoke<Project>('get_project', { id: projectId });
-      currentProject.set(updated);
+
+      // Merge changes into existing project without replacing the whole object.
+      // This prevents the PhotoViewer from re-mounting the <img> on every poll.
+      currentProject.update((prev) => {
+        if (!prev) return updated;
+        // Update photo count if new photos were added
+        if (updated.photos.length !== prev.photos.length) {
+          return updated; // structural change, must replace
+        }
+        // Patch individual photo grades/scores without replacing the array
+        let changed = false;
+        const photos = prev.photos.map((p, i) => {
+          const u = updated.photos[i];
+          if (!u || p.path !== u.path) return p; // different photo, skip
+          if (p.grade !== u.grade || p.faces.length !== u.faces.length ||
+              p.graded_at !== u.graded_at || p.faces_detected_at !== u.faces_detected_at) {
+            changed = true;
+            return u;
+          }
+          return p;
+        });
+        if (!changed && prev.clusters.length === updated.clusters.length) return prev;
+        return { ...prev, photos, clusters: updated.clusters };
+      });
 
       const needsGrading = updated.photos.filter(p => !p.graded_at && p.grade_source !== 'Manual').length;
       const needsFaces = updated.photos.filter(p => !p.faces_detected_at).length;
