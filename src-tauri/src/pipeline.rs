@@ -249,6 +249,8 @@ pub fn run_enrichment(
     let det_path = models::detector_model_path()?;
     let emb_path = models::embedder_model_path()?;
 
+    eprintln!("[enrichment] Stage 2: det_path={:?} exists={}, emb_path={:?} exists={}", det_path, det_path.exists(), emb_path, emb_path.exists());
+
     if det_path.exists() && emb_path.exists() {
         let needs_detection: Vec<usize> = project
             .photos
@@ -258,9 +260,19 @@ pub fn run_enrichment(
             .map(|(i, _)| i)
             .collect();
 
+        eprintln!("[enrichment] Need to detect faces in {} photos", needs_detection.len());
+
         if !needs_detection.is_empty() {
-            let mut detector = FaceDetector::new(&det_path)?;
-            let mut embedder = FaceEmbedder::new(&emb_path)?;
+            eprintln!("[enrichment] Loading SCRFD detector...");
+            let mut detector = match FaceDetector::new(&det_path) {
+                Ok(d) => { eprintln!("[enrichment] SCRFD loaded OK"); d },
+                Err(e) => { eprintln!("[enrichment] SCRFD failed: {}", e); return Err(e); }
+            };
+            eprintln!("[enrichment] Loading ArcFace embedder...");
+            let mut embedder = match FaceEmbedder::new(&emb_path) {
+                Ok(e) => { eprintln!("[enrichment] ArcFace loaded OK"); e },
+                Err(e) => { eprintln!("[enrichment] ArcFace failed: {}", e); return Err(e); }
+            };
 
             let detect_total = needs_detection.len();
             for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
