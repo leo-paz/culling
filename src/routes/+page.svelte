@@ -13,6 +13,7 @@
     activePerson,
     currentIndex,
     enrichmentStatus,
+    startEnrichmentPolling,
     type Photo,
     type Project,
   } from '$lib/stores/project';
@@ -99,15 +100,21 @@
 
     if (!$currentProject) return;
 
-    // Cmd+R / Ctrl+R → refresh current project from disk
+    // Cmd+R / Ctrl+R → rescan folder for new/changed photos + re-enrich
     if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       const project = $currentProject;
       if (project) {
-        invoke<import('$lib/stores/project').Project>('get_project', { id: project.id })
+        // open_project scans for new files, then start_enrichment processes them
+        invoke<import('$lib/stores/project').Project>('open_project', { id: project.id })
           .then((refreshed) => {
             currentProject.set(refreshed);
             fullscreen.set(false);
+            // Trigger enrichment for any new/changed photos
+            invoke('start_enrichment', { projectId: refreshed.id }).catch(() => {});
+            // Start polling for progress
+            enrichmentStatus.set({ stage: 'grading', current: 0, total: 0 });
+            startEnrichmentPolling(refreshed.id);
           })
           .catch((e) => console.error('Failed to refresh project:', e));
       }

@@ -1,4 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
+import { invoke } from '@tauri-apps/api/core';
 
 // Types mirroring Rust backend
 export interface FaceDetection {
@@ -102,6 +103,34 @@ export function navigateTo(index: number) {
   const total = get(filteredCount);
   if (total === 0) return;
   currentIndex.set(Math.max(0, Math.min(index, total - 1)));
+}
+
+/** Poll the project from disk every 3 seconds to pick up enrichment progress.
+ *  Call this after starting enrichment. Stops when all processing is done. */
+let _pollInterval: ReturnType<typeof setInterval> | null = null;
+export function startEnrichmentPolling(projectId: string) {
+  if (_pollInterval) clearInterval(_pollInterval);
+  _pollInterval = setInterval(async () => {
+    try {
+      const updated = await invoke<Project>('get_project', { id: projectId });
+      currentProject.set(updated);
+
+      const needsGrading = updated.photos.filter(p => !p.graded_at && p.grade_source !== 'Manual').length;
+      const needsFaces = updated.photos.filter(p => !p.faces_detected_at).length;
+      const total = updated.photos.length;
+
+      if (needsGrading > 0) {
+        enrichmentStatus.set({ stage: 'grading', current: total - needsGrading, total });
+      } else if (needsFaces > 0) {
+        enrichmentStatus.set({ stage: 'faces', current: total - needsFaces, total });
+      } else {
+        enrichmentStatus.set({ stage: null, current: 0, total: 0 });
+        if (_pollInterval) { clearInterval(_pollInterval); _pollInterval = null; }
+      }
+    } catch {
+      // Project might be getting written — skip this poll
+    }
+  }, 3000);
 }
 
 export function updatePhotoGrade(photoPath: string, grade: Photo['grade']) {
