@@ -19,11 +19,6 @@ pub fn working_dir(project_id: &str) -> Result<PathBuf, CullingError> {
     Ok(data_dir()?.join("working").join(project_id))
 }
 
-/// Get path to a 1280px working copy for a photo.
-pub fn working_path(project_id: &str, filename: &str) -> Result<PathBuf, CullingError> {
-    Ok(working_dir(project_id)?.join(filename))
-}
-
 /// Generate a thumbnail AND a 1280px working copy for a single photo.
 /// The full image is decoded once; both sizes are saved from it.
 /// Returns the thumbnail path.
