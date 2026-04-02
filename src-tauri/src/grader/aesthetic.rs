@@ -6,17 +6,18 @@ use crate::error::CullingError;
 use image::DynamicImage;
 use std::path::Path;
 
-/// Compute a simple aesthetic score (0-10) based on image properties.
-/// This is a heuristic approximation -- a real NIMA model would be better.
+/// Compute a simple aesthetic score (0-10) from a file path.
 pub fn score_aesthetic(image_path: &Path) -> Result<f32, CullingError> {
     let img = image::open(image_path)?;
+    Ok(score_aesthetic_image(&img))
+}
 
-    let contrast_score = compute_contrast(&img);
-    let saturation_score = compute_saturation(&img);
-
-    // Combine into 0-10 score (equal weighting)
-    let score = (contrast_score * 0.5 + saturation_score * 0.5) * 10.0;
-    Ok(score.clamp(0.0, 10.0))
+/// Compute a simple aesthetic score (0-10) from a pre-loaded image.
+/// Avoids redundant disk I/O when the image is already in memory.
+pub fn score_aesthetic_image(img: &DynamicImage) -> f32 {
+    let contrast_score = compute_contrast(img);
+    let saturation_score = compute_saturation(img);
+    ((contrast_score * 0.5 + saturation_score * 0.5) * 10.0).clamp(0.0, 10.0)
 }
 
 /// Compute a contrast score (0-1) based on the standard deviation of luminance.
