@@ -48,13 +48,18 @@
 
     if (!$currentProject) return;
 
-    // Cmd+R / Ctrl+R → reload app (reset to welcome screen)
+    // Cmd+R / Ctrl+R → refresh current project from disk
     if (e.key === 'r' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      currentProject.set(null);
-      currentIndex.set(0);
-      activePerson.set(null);
-      fullscreen.set(false);
+      const project = $currentProject;
+      if (project) {
+        invoke<import('$lib/stores/project').Project>('get_project', { id: project.id })
+          .then((refreshed) => {
+            currentProject.set(refreshed);
+            fullscreen.set(false);
+          })
+          .catch((e) => console.error('Failed to refresh project:', e));
+      }
       return;
     }
 

@@ -8,8 +8,8 @@
   import { currentProject, type Project } from '$lib/stores/project';
 
   let open_dialog = $state(false);
-  let gradeFilter = $state<'all' | 'ok_and_good' | 'good_only'>('ok_and_good');
-  let organization = $state<'flat' | 'by_person'>('flat');
+  let gradeFilter = $state<'All' | 'OkAndGood' | 'GoodOnly'>('OkAndGood');
+  let organization = $state<'Flat' | 'ByPerson'>('Flat');
   let trashBad = $state(false);
   let exporting = $state(false);
   let exportProgress = $state<{ current: number; total: number } | null>(null);
@@ -29,13 +29,13 @@
     const project = $currentProject;
     if (!project) return 0;
     switch (gradeFilter) {
-      case 'all':
+      case 'All':
         return project.photos.length;
-      case 'ok_and_good':
+      case 'OkAndGood':
         return project.photos.filter(
           (p) => p.grade !== 'Bad'
         ).length;
-      case 'good_only':
+      case 'GoodOnly':
         return project.photos.filter(
           (p) => p.grade === 'Good'
         ).length;
@@ -142,7 +142,7 @@
               <input
                 type="radio"
                 name="gradeFilter"
-                value="ok_and_good"
+                value="OkAndGood"
                 bind:group={gradeFilter}
                 class="w-4 h-4 accent-accent bg-zinc-800 border-zinc-600"
               />
@@ -154,7 +154,7 @@
               <input
                 type="radio"
                 name="gradeFilter"
-                value="good_only"
+                value="GoodOnly"
                 bind:group={gradeFilter}
                 class="w-4 h-4 accent-accent bg-zinc-800 border-zinc-600"
               />
@@ -166,7 +166,7 @@
               <input
                 type="radio"
                 name="gradeFilter"
-                value="all"
+                value="All"
                 bind:group={gradeFilter}
                 class="w-4 h-4 accent-accent bg-zinc-800 border-zinc-600"
               />
@@ -187,7 +187,7 @@
               <input
                 type="radio"
                 name="organization"
-                value="flat"
+                value="Flat"
                 bind:group={organization}
                 class="w-4 h-4 accent-accent bg-zinc-800 border-zinc-600"
               />
@@ -199,7 +199,7 @@
               <input
                 type="radio"
                 name="organization"
-                value="by_person"
+                value="ByPerson"
                 bind:group={organization}
                 disabled={!hasClusters}
                 class="w-4 h-4 accent-accent bg-zinc-800 border-zinc-600 disabled:opacity-40"
