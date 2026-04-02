@@ -60,6 +60,7 @@ pub async fn import_folder(path: String) -> Result<Project, CullingError> {
             faces: Vec::new(),
             aesthetic_score: None,
             sharpness_score: None,
+            grade_reason: None,
             content_hash: pipeline::compute_content_hash(e.path()).ok(),
             graded_at: None,
             faces_detected_at: None,

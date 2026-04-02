@@ -41,6 +41,11 @@
       <span class="text-zinc-600">
         ({$currentPhoto.grade_source === 'Auto' ? 'auto' : 'manual'})
       </span>
+      {#if $currentPhoto.grade_reason}
+        <span class="text-zinc-600 ml-1 truncate max-w-[250px]" title={$currentPhoto.grade_reason}>
+          — {$currentPhoto.grade_reason}
+        </span>
+      {/if}
     {/if}
   </div>
 

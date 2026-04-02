@@ -15,6 +15,7 @@ export interface Photo {
   faces: FaceDetection[];
   aesthetic_score: number | null;
   sharpness_score: number | null;
+  grade_reason: string | null;
   content_hash: string | null;
   graded_at: number | null;
   faces_detected_at: number | null;
