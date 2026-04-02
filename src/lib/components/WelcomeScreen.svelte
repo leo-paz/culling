@@ -3,11 +3,51 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { Button } from '$lib/components/ui/button';
   import { Separator } from '$lib/components/ui/separator';
-  import { currentProject, currentIndex, type Project } from '$lib/stores/project';
+  import { currentProject, currentIndex, enrichmentStatus, type Project } from '$lib/stores/project';
 
   let recentProjects = $state<Project[]>([]);
   let isImporting = $state(false);
   let error = $state<string | null>(null);
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+  /** Start enrichment and poll the project from disk every 3 seconds to pick up
+   *  grading/detection progress. This works around Tauri events not flushing
+   *  from spawn_blocking threads. */
+  function startEnrichmentWithPolling(projectId: string) {
+    // Fire off enrichment (returns immediately, runs in background)
+    invoke('start_enrichment', { projectId }).catch((e) =>
+      console.error('Enrichment start failed:', e)
+    );
+
+    enrichmentStatus.set({ stage: 'grading', current: 0, total: 0 });
+
+    // Poll project from disk every 3 seconds to see progress
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(async () => {
+      try {
+        const updated = await invoke<Project>('get_project', { id: projectId });
+        const prev = $currentProject;
+        currentProject.set(updated);
+
+        // Compute enrichment status from the data
+        const needsGrading = updated.photos.filter(p => !p.graded_at && p.grade_source !== 'Manual').length;
+        const needsFaces = updated.photos.filter(p => !p.faces_detected_at).length;
+        const total = updated.photos.length;
+
+        if (needsGrading > 0) {
+          enrichmentStatus.set({ stage: 'grading', current: total - needsGrading, total });
+        } else if (needsFaces > 0) {
+          enrichmentStatus.set({ stage: 'faces', current: total - needsFaces, total });
+        } else {
+          // Everything done
+          enrichmentStatus.set({ stage: null, current: 0, total: 0 });
+          if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+        }
+      } catch {
+        // Project might be getting written — skip this poll
+      }
+    }, 3000);
+  }
 
   async function loadRecentProjects() {
     try {
@@ -23,10 +63,8 @@
       currentIndex.set(0);
       const loaded = await invoke<Project>('open_project', { id: project.id });
       currentProject.set(loaded);
-      // Trigger background enrichment (thumbnails + grading + face detection)
-      invoke('start_enrichment', { projectId: loaded.id }).catch((e) =>
-        console.error('Enrichment failed:', e)
-      );
+      // Trigger background enrichment and poll for updates
+      startEnrichmentWithPolling(loaded.id);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -44,10 +82,8 @@
       currentProject.set(project);
       isImporting = false;
 
-      // Trigger background enrichment (thumbnails + grading + face detection)
-      invoke('start_enrichment', { projectId: project.id }).catch((e) =>
-        console.error('Enrichment failed:', e)
-      );
+      // Trigger background enrichment and poll for updates
+      startEnrichmentWithPolling(project.id);
     } catch (e) {
       isImporting = false;
       error = e instanceof Error ? e.message : String(e);
