@@ -16,6 +16,16 @@
   --font-mono: 'JetBrains Mono', monospace;
 }
 
+@keyframes fade-out {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.animate-fade-out {
+  animation: fade-out 1.2s ease-out forwards;
+}
+
 html, body {
   background-color: var(--color-surface);
   color: #fafafa;

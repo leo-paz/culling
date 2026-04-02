@@ -10,9 +10,11 @@
 
   let detecting = $state(false);
   let detectProgress = $state<{ current: number; total: number; message: string } | null>(null);
+  let detectError = $state<string | null>(null);
 
   let grading = $state(false);
   let gradeProgress = $state<{ current: number; total: number; message: string } | null>(null);
+  let gradeError = $state<string | null>(null);
 
   let hasClusters = $derived(
     ($currentProject?.clusters?.length ?? 0) > 0
@@ -42,12 +44,14 @@
     };
 
     try {
+      detectError = null;
       const updated = await invoke<Project>('start_face_detection', {
         projectId: project.id,
         onProgress,
       });
       currentProject.set(updated);
     } catch (e) {
+      detectError = String(e);
       console.error('Face detection failed:', e);
     } finally {
       detecting = false;
@@ -67,12 +71,14 @@
     };
 
     try {
+      gradeError = null;
       const updated = await invoke<Project>('start_auto_grade', {
         projectId: project.id,
         onProgress,
       });
       currentProject.set(updated);
     } catch (e) {
+      gradeError = String(e);
       console.error('Auto-grade failed:', e);
     } finally {
       grading = false;
@@ -81,7 +87,7 @@
   }
 </script>
 
-<header class="flex items-center justify-between bg-surface-raised border-b border-zinc-800 px-3 h-12">
+<header class="relative flex items-center justify-between bg-surface-raised border-b border-zinc-800 px-3 h-12">
   <!-- Left: View Mode Tabs -->
   <div class="flex items-center">
     <Tabs.Root bind:value={$viewMode}>
@@ -148,6 +154,20 @@
       </Tooltip.Content>
     </Tooltip.Root>
   </div>
+
+  <!-- Error messages -->
+  {#if detectError}
+    <div class="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded bg-grade-bad/20 border border-grade-bad/30 text-grade-bad text-xs max-w-md text-center">
+      {detectError}
+      <button class="ml-2 text-zinc-400 hover:text-zinc-200" onclick={() => detectError = null}>×</button>
+    </div>
+  {/if}
+  {#if gradeError}
+    <div class="absolute top-12 left-1/2 -translate-x-1/2 z-10 px-4 py-2 rounded bg-grade-bad/20 border border-grade-bad/30 text-grade-bad text-xs max-w-md text-center">
+      {gradeError}
+      <button class="ml-2 text-zinc-400 hover:text-zinc-200" onclick={() => gradeError = null}>×</button>
+    </div>
+  {/if}
 
   <!-- Right: Export -->
   <div class="flex items-center">
