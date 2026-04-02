@@ -21,6 +21,9 @@ pub struct Photo {
     pub faces: Vec<FaceDetection>,
     pub aesthetic_score: Option<f32>,
     pub sharpness_score: Option<f32>,
+    pub content_hash: Option<String>,
+    pub graded_at: Option<u64>,
+    pub faces_detected_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]

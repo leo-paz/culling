@@ -25,10 +25,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import_folder,
             commands::get_project,
+            commands::open_project,
             commands::list_projects,
             commands::update_grade,
-            commands::start_face_detection,
-            commands::start_auto_grade,
+            commands::start_enrichment,
             commands::generate_thumbnails,
             commands::get_thumbnail_path,
             commands::check_models,

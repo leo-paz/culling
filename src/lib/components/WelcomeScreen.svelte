@@ -3,8 +3,7 @@
   import { open } from '@tauri-apps/plugin-dialog';
   import { Button } from '$lib/components/ui/button';
   import { Separator } from '$lib/components/ui/separator';
-  import { currentProject, currentIndex, thumbnailProgress, type Project } from '$lib/stores/project';
-  import { Channel } from '@tauri-apps/api/core';
+  import { currentProject, currentIndex, type Project } from '$lib/stores/project';
 
   let recentProjects = $state<Project[]>([]);
   let isImporting = $state(false);
@@ -20,10 +19,17 @@
   }
 
   async function openProject(project: Project) {
-    currentIndex.set(0);
-    currentProject.set(project);
-    // Thumbnails generate lazily — filmstrip falls back to full photos
-    generateThumbnailsInBackground(project.id);
+    try {
+      currentIndex.set(0);
+      const loaded = await invoke<Project>('open_project', { id: project.id });
+      currentProject.set(loaded);
+      // Trigger background enrichment (thumbnails + grading + face detection)
+      invoke('start_enrichment', { projectId: loaded.id }).catch((e) =>
+        console.error('Enrichment failed:', e)
+      );
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function handleImport() {
@@ -38,31 +44,14 @@
       currentProject.set(project);
       isImporting = false;
 
-      // Don't block — start thumbnail generation in background
-      generateThumbnailsInBackground(project.id);
+      // Trigger background enrichment (thumbnails + grading + face detection)
+      invoke('start_enrichment', { projectId: project.id }).catch((e) =>
+        console.error('Enrichment failed:', e)
+      );
     } catch (e) {
       isImporting = false;
       error = e instanceof Error ? e.message : String(e);
     }
-  }
-
-  function generateThumbnailsInBackground(projectId: string) {
-    // Fire-and-forget: thumbnails generate in background while user can browse
-    const channel = new Channel<{ current: number; total: number; message: string }>();
-    channel.onmessage = (msg) => {
-      if (msg.total > 0) {
-        thumbnailProgress.set(Math.round((msg.current / msg.total) * 100));
-      }
-    };
-    invoke<number>('generate_thumbnails', {
-      projectId,
-      onProgress: channel,
-    })
-      .then(() => thumbnailProgress.set(null))
-      .catch((e) => {
-        thumbnailProgress.set(null);
-        console.error('Thumbnail generation failed:', e);
-      });
   }
 
   // Load recent projects on mount
