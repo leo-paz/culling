@@ -43,6 +43,10 @@ pub fn compute_content_hash(path: &std::path::Path) -> Result<String, CullingErr
 /// Progress callback that takes (stage_name, current, total).
 pub type EnrichmentProgressFn = Box<dyn Fn(&str, usize, usize) + Send + Sync>;
 
+/// Callback emitted when a single photo's grade is determined.
+/// Takes (photo_path, grade, grade_source).
+pub type PhotoGradedFn = Box<dyn Fn(&str, &str, &str) + Send + Sync>;
+
 /// Scan source folder and sync with project state.
 /// Returns the number of new photos added.
 pub fn scan_for_changes(project: &mut Project) -> Result<usize, CullingError> {
@@ -122,6 +126,7 @@ pub fn run_enrichment(
     project: &mut Project,
     config: &Config,
     on_progress: &EnrichmentProgressFn,
+    on_photo_graded: &PhotoGradedFn,
 ) -> Result<(), CullingError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -141,34 +146,51 @@ pub fn run_enrichment(
     for (progress_idx, photo_idx) in needs_grading.iter().enumerate() {
         let photo_path = project.photos[*photo_idx].path.clone();
 
-        let heuristic = match crate::grader::heuristics::analyze(&photo_path, &config.grading) {
-            Ok(result) => result,
+        // Open image ONCE and resize to working size for speed.
+        // Full 26MP Fuji JPGs are ~25MB to decode — a 800px working copy is sufficient
+        // for sharpness, exposure, and aesthetic analysis.
+        let img = match image::open(&photo_path) {
+            Ok(img) => img.resize(800, 800, image::imageops::FilterType::Triangle),
             Err(e) => {
-                eprintln!("Warning: grading failed for {:?}: {}", photo_path, e);
-                // Mark as graded so we don't retry forever
+                eprintln!("Warning: failed to open {:?}: {}", photo_path, e);
                 project.photos[*photo_idx].graded_at = Some(now);
                 on_progress("grading", progress_idx + 1, grade_total);
                 continue;
             }
         };
 
+        // Run heuristics and aesthetic on the same pre-loaded, resized image
+        let heuristic = crate::grader::heuristics::analyze_image(&img, &config.grading)?;
         project.photos[*photo_idx].sharpness_score = Some(heuristic.sharpness);
 
-        if heuristic.is_bad {
-            project.photos[*photo_idx].grade = Grade::Bad;
+        let grade = if heuristic.is_bad {
+            Grade::Bad
         } else {
-            let aesthetic =
-                crate::grader::aesthetic::score_aesthetic(&photo_path).unwrap_or(5.0);
+            let aesthetic = crate::grader::aesthetic::score_aesthetic_image(&img);
             project.photos[*photo_idx].aesthetic_score = Some(aesthetic);
-            project.photos[*photo_idx].grade = if aesthetic >= config.grading.aesthetic_good_threshold
-            {
+            if aesthetic >= config.grading.aesthetic_good_threshold {
                 Grade::Good
             } else {
                 Grade::Ok
-            };
-        }
+            }
+        };
+
+        project.photos[*photo_idx].grade = grade;
         project.photos[*photo_idx].grade_source = GradeSource::Auto;
         project.photos[*photo_idx].graded_at = Some(now);
+
+        // Emit per-photo grade event so the UI updates in real-time
+        let grade_str = match grade {
+            Grade::Bad => "Bad",
+            Grade::Ok => "Ok",
+            Grade::Good => "Good",
+            Grade::Ungraded => "Ungraded",
+        };
+        on_photo_graded(
+            &photo_path.to_string_lossy(),
+            grade_str,
+            "Auto",
+        );
 
         on_progress("grading", progress_idx + 1, grade_total);
 

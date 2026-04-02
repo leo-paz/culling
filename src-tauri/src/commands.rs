@@ -121,6 +121,7 @@ pub async fn start_enrichment(
 ) -> Result<(), CullingError> {
     let app_for_thumbs = app.clone();
     let app_for_progress = app.clone();
+    let app_for_graded = app.clone();
     let app_for_complete = app.clone();
 
     tokio::task::spawn_blocking(move || {
@@ -163,7 +164,19 @@ pub async fn start_enrichment(
                 );
             });
 
-        pipeline::run_enrichment(&mut project, &config, &progress)?;
+        let photo_graded: pipeline::PhotoGradedFn =
+            Box::new(move |path, grade, source| {
+                let _ = app_for_graded.emit(
+                    "enrichment:photo-graded",
+                    serde_json::json!({
+                        "path": path,
+                        "grade": grade,
+                        "gradeSource": source,
+                    }),
+                );
+            });
+
+        pipeline::run_enrichment(&mut project, &config, &progress, &photo_graded)?;
 
         // Emit completion with the updated project
         let _ = app_for_complete.emit("enrichment:complete", &project);

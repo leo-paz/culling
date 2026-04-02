@@ -13,12 +13,16 @@ pub struct HeuristicResult {
     pub is_bad: bool, // true if any heuristic flags it
 }
 
-/// Run all heuristic checks on an image.
+/// Run all heuristic checks on an image loaded from disk.
 pub fn analyze(image_path: &Path, config: &GradingConfig) -> Result<HeuristicResult, CullingError> {
     let img = image::open(image_path)?;
+    analyze_image(&img, config)
+}
 
-    let sharpness = compute_sharpness(&img);
-    let (is_overexposed, is_underexposed) = check_exposure(&img, config.exposure_clip_threshold);
+/// Run all heuristic checks on a pre-loaded image (avoids redundant disk I/O).
+pub fn analyze_image(img: &DynamicImage, config: &GradingConfig) -> Result<HeuristicResult, CullingError> {
+    let sharpness = compute_sharpness(img);
+    let (is_overexposed, is_underexposed) = check_exposure(img, config.exposure_clip_threshold);
     let is_blurry = sharpness < config.sharpness_threshold;
 
     Ok(HeuristicResult {

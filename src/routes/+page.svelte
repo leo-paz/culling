@@ -37,6 +37,23 @@
       }
     );
 
+    // Real-time grade updates — update individual photo in the store as it's graded
+    const unlistenGraded = listen<{ path: string; grade: string; gradeSource: string }>(
+      'enrichment:photo-graded',
+      (event) => {
+        const { path, grade, gradeSource } = event.payload;
+        currentProject.update((project) => {
+          if (!project) return project;
+          const photos = project.photos.map((p) =>
+            p.path === path
+              ? { ...p, grade: grade as Photo['grade'], grade_source: gradeSource as Photo['grade_source'] }
+              : p
+          );
+          return { ...project, photos };
+        });
+      }
+    );
+
     const unlistenComplete = listen<Project>('enrichment:complete', (event) => {
       enrichmentStatus.set({ stage: null, current: 0, total: 0 });
       currentProject.set(event.payload);
@@ -44,6 +61,7 @@
 
     return () => {
       unlistenProgress.then((fn) => fn());
+      unlistenGraded.then((fn) => fn());
       unlistenComplete.then((fn) => fn());
     };
   });
