@@ -20,6 +20,24 @@
     }
   }
 
+  function gradeReason(photo: Photo): string | null {
+    // Use stored reason if available (new photos have this)
+    if (photo.grade_reason) return photo.grade_reason;
+    // Fall back to inferring from existing scores (old photos graded before grade_reason was added)
+    if (photo.grade_source !== 'Auto') return null;
+    if (photo.grade === 'Bad') {
+      if (photo.sharpness_score !== null && photo.sharpness_score < 100) {
+        return `Blurry (sharpness: ${photo.sharpness_score.toFixed(0)})`;
+      }
+      // Sharpness is fine but still Bad → must be exposure issue
+      return 'Exposure issue (over/underexposed)';
+    }
+    if (photo.aesthetic_score !== null) {
+      return `Aesthetic: ${photo.aesthetic_score.toFixed(1)}/10`;
+    }
+    return null;
+  }
+
   function gradeLabelColor(grade: Photo['grade']): string {
     switch (grade) {
       case 'Bad': return 'text-grade-bad';
@@ -41,9 +59,9 @@
       <span class="text-zinc-600">
         ({$currentPhoto.grade_source === 'Auto' ? 'auto' : 'manual'})
       </span>
-      {#if $currentPhoto.grade_reason}
-        <span class="text-zinc-600 ml-1 truncate max-w-[250px]" title={$currentPhoto.grade_reason}>
-          — {$currentPhoto.grade_reason}
+      {#if gradeReason($currentPhoto)}
+        <span class="text-zinc-600 ml-1 truncate max-w-[250px]" title={gradeReason($currentPhoto) ?? ''}>
+          — {gradeReason($currentPhoto)}
         </span>
       {/if}
     {/if}
