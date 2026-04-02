@@ -274,12 +274,10 @@ pub fn run_enrichment(
                 Err(e) => { eprintln!("[enrichment] ArcFace failed: {}", e); return Err(e); }
             };
 
-            // Use pre-generated thumbnails (~300px, ~30KB) instead of full images (~25MB).
-            // This is ~100x faster since we skip decoding 26MP JPEGs.
-            // Detection quality is slightly lower for tiny faces but fine for prominent subjects.
-            // The SCRFD model resizes input to 640x640 anyway, so 300px → 640px upscaling
-            // preserves most of the signal for faces that are a reasonable size.
-            let thumb_dir = crate::thumbnailer::thumbnail_dir(&project.id)?;
+            // Use 1280px working copies generated during the thumbnail stage.
+            // These are ~200KB JPEGs (vs 25MB originals) but have enough resolution
+            // for high-quality face detection and embedding.
+            let work_dir = crate::thumbnailer::working_dir(&project.id)?;
 
             let detect_total = needs_detection.len();
             for (progress_idx, photo_idx) in needs_detection.iter().enumerate() {
@@ -288,23 +286,19 @@ pub fn run_enrichment(
 
                 let t0 = std::time::Instant::now();
 
-                // Prefer thumbnail for speed; fall back to full image if thumbnail missing
+                // Use 1280px working copy; fall back to full image if missing
                 let detect_path = {
-                    let thumb = thumb_dir.join(&filename);
-                    if thumb.exists() { thumb } else { photo_path.clone() }
+                    let work = work_dir.join(&filename);
+                    if work.exists() { work } else { photo_path.clone() }
                 };
 
                 eprintln!("[enrichment] Processing {}/{}: {} (path: {:?})",
                     progress_idx + 1, detect_total, filename, detect_path);
 
-                // On thumbnails (~300px), use a proportional min face size.
-                // A face that's 80px in a 6240px original is ~4px in a 300px thumbnail.
-                // Set minimum to 30px on thumbnails — this catches faces that are at least
-                // ~600px in the original (reasonable for a photo subject).
                 let detected = match detector.detect(
                     &detect_path,
                     config.detection.min_confidence,
-                    30,
+                    config.detection.min_face_size,
                 ) {
                     Ok(d) => d,
                     Err(e) => {
@@ -386,7 +380,14 @@ pub fn run_enrichment(
     Ok(())
 }
 
+/// Special cluster IDs for virtual categories.
+/// Real person clusters use IDs 0..N from DBSCAN.
+/// These use high IDs to avoid collision.
+pub const CLUSTER_ID_GROUPS: usize = usize::MAX - 1;
+pub const CLUSTER_ID_NO_PEOPLE: usize = usize::MAX - 2;
+
 /// Build cluster summaries from face detections across all photos.
+/// Includes virtual clusters for "Groups" (multiple faces) and "No People" (no faces).
 pub fn build_cluster_summaries(project: &mut Project) {
     struct ClusterInfo {
         best_confidence: f32,
@@ -396,8 +397,26 @@ pub fn build_cluster_summaries(project: &mut Project) {
     }
 
     let mut cluster_map: HashMap<usize, ClusterInfo> = HashMap::new();
+    let mut group_photos: HashSet<PathBuf> = HashSet::new();
+    let mut no_people_photos: HashSet<PathBuf> = HashSet::new();
 
     for photo in &project.photos {
+        if photo.faces.is_empty() {
+            // Only count as "no people" if face detection has actually run
+            if photo.faces_detected_at.is_some() {
+                no_people_photos.insert(photo.path.clone());
+            }
+            continue;
+        }
+
+        // Track if this photo has multiple different people (group shot)
+        let unique_clusters: HashSet<_> = photo.faces.iter()
+            .filter_map(|f| f.cluster_id)
+            .collect();
+        if unique_clusters.len() > 1 {
+            group_photos.insert(photo.path.clone());
+        }
+
         for face in &photo.faces {
             if let Some(cid) = face.cluster_id {
                 let entry = cluster_map.entry(cid).or_insert_with(|| ClusterInfo {
@@ -421,7 +440,7 @@ pub fn build_cluster_summaries(project: &mut Project) {
     let mut cluster_ids: Vec<usize> = cluster_map.keys().copied().collect();
     cluster_ids.sort();
 
-    project.clusters = cluster_ids
+    let mut clusters: Vec<Cluster> = cluster_ids
         .into_iter()
         .enumerate()
         .map(|(label_num, cid)| {
@@ -435,4 +454,30 @@ pub fn build_cluster_summaries(project: &mut Project) {
             }
         })
         .collect();
+
+    // Add virtual "Groups" cluster
+    if !group_photos.is_empty() {
+        let first_group = group_photos.iter().next().cloned().unwrap_or_default();
+        clusters.push(Cluster {
+            id: CLUSTER_ID_GROUPS,
+            label: "Groups".to_string(),
+            representative_photo: first_group,
+            representative_bbox: [0.0; 4],
+            photo_count: group_photos.len(),
+        });
+    }
+
+    // Add virtual "No People" cluster
+    if !no_people_photos.is_empty() {
+        let first_no_people = no_people_photos.iter().next().cloned().unwrap_or_default();
+        clusters.push(Cluster {
+            id: CLUSTER_ID_NO_PEOPLE,
+            label: "Landscapes".to_string(),
+            representative_photo: first_no_people,
+            representative_bbox: [0.0; 4],
+            photo_count: no_people_photos.len(),
+        });
+    }
+
+    project.clusters = clusters;
 }

@@ -14,7 +14,19 @@ pub fn thumbnail_path(project_id: &str, filename: &str) -> Result<PathBuf, Culli
     Ok(thumbnail_dir(project_id)?.join(filename))
 }
 
-/// Generate a thumbnail for a single photo. Returns the thumbnail path.
+/// Directory for 1280px working copies used by face detection.
+pub fn working_dir(project_id: &str) -> Result<PathBuf, CullingError> {
+    Ok(data_dir()?.join("working").join(project_id))
+}
+
+/// Get path to a 1280px working copy for a photo.
+pub fn working_path(project_id: &str, filename: &str) -> Result<PathBuf, CullingError> {
+    Ok(working_dir(project_id)?.join(filename))
+}
+
+/// Generate a thumbnail AND a 1280px working copy for a single photo.
+/// The full image is decoded once; both sizes are saved from it.
+/// Returns the thumbnail path.
 pub fn generate_thumbnail(
     photo_path: &Path,
     project_id: &str,
@@ -22,23 +34,34 @@ pub fn generate_thumbnail(
     max_size: u32,
 ) -> Result<PathBuf, CullingError> {
     let thumb_dir = thumbnail_dir(project_id)?;
+    let work_dir = working_dir(project_id)?;
     fs::create_dir_all(&thumb_dir)?;
+    fs::create_dir_all(&work_dir)?;
 
-    let output_path = thumb_dir.join(filename);
+    let thumb_path = thumb_dir.join(filename);
+    let work_path = work_dir.join(filename);
 
-    // Skip if already exists
-    if output_path.exists() {
-        return Ok(output_path);
+    // Skip if both already exist
+    if thumb_path.exists() && work_path.exists() {
+        return Ok(thumb_path);
     }
 
+    // Decode the full image once
     let img = image::open(photo_path)?;
 
-    // Resize to fit within max_size x max_size, maintaining aspect ratio
-    let thumb = img.resize(max_size, max_size, FilterType::Lanczos3);
+    // Save 1280px working copy (for face detection — needs more resolution than thumbnail)
+    if !work_path.exists() {
+        let working = img.resize(1280, 1280, FilterType::Triangle);
+        working.save(&work_path)?;
+    }
 
-    thumb.save(&output_path)?;
+    // Save thumbnail (for filmstrip display)
+    if !thumb_path.exists() {
+        let thumb = img.resize(max_size, max_size, FilterType::Lanczos3);
+        thumb.save(&thumb_path)?;
+    }
 
-    Ok(output_path)
+    Ok(thumb_path)
 }
 
 /// Generate thumbnails for all photos in a project.
