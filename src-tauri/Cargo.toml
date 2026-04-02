@@ -39,3 +39,13 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 tauri-plugin-webdriver-automation = "0.1.3"
 
+# Optimize heavy dependencies even in debug builds for acceptable ONNX inference speed
+[profile.dev.package.ort]
+opt-level = 3
+[profile.dev.package.ndarray]
+opt-level = 3
+[profile.dev.package.nalgebra]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+
